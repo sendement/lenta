@@ -1,0 +1,30 @@
+[package]
+name = "lenta"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Gamepad-first game launcher: Steam, Heroic and Lutris games on a ribbon of cards"
+
+[dependencies]
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.36"
+egui_extras = { version = "0.36", features = ["svg", "image", "file"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "ico", "bmp"] }
+gilrs = "0.11"
+crossbeam-channel = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+dirs = "7"
+ureq = "3"
+rusqlite = { version = "0.37", features = ["bundled"] }
+freedesktop-desktop-entry = "0.8"
+freedesktop-icons = "0.4"
+libc = "0.2"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[dev-dependencies]
+egui_kittest = { version = "0.36", features = ["wgpu", "snapshot", "eframe"] }
