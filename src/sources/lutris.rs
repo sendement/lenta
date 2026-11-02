@@ -47,6 +47,50 @@ fn cache_dir(root: &Path, flatpak: bool, sub: &str) -> Vec<PathBuf> {
     v
 }
 
+/// The game's exe and Wine prefix from its YAML config (only the `game:`
+/// section's two keys are needed, so no YAML parser).
+fn game_config(root: &Path, flatpak: bool, name: &str) -> (Option<PathBuf>, Option<PathBuf>) {
+    let mut places = vec![root.join(format!("games/{name}.yml"))];
+    let conf = if flatpak {
+        dirs::home_dir().map(|h| h.join(".var/app/net.lutris.Lutris/config/lutris"))
+    } else {
+        dirs::config_dir().map(|c| c.join("lutris"))
+    };
+    places.extend(conf.map(|c| c.join(format!("games/{name}.yml"))));
+    let Some(text) = places.iter().find_map(|p| std::fs::read_to_string(p).ok()) else {
+        return (None, None);
+    };
+    let (mut exe, mut prefix) = (None, None);
+    let mut in_game = false;
+    for line in text.lines() {
+        if !line.starts_with(' ') && !line.is_empty() {
+            in_game = line.trim_end() == "game:";
+            continue;
+        }
+        if !in_game {
+            continue;
+        }
+        let Some((k, v)) = line.trim().split_once(':') else {
+            continue;
+        };
+        let v = v.trim().trim_matches(|c| c == '\'' || c == '"');
+        if v.is_empty() {
+            continue;
+        }
+        let path = |v: &str| match v.strip_prefix("~/") {
+            Some(rest) => dirs::home_dir().map(|h| h.join(rest)),
+            None => Some(PathBuf::from(v)),
+        };
+        match k.trim() {
+            "exe" => exe = path(v),
+            "prefix" => prefix = path(v),
+            _ => {}
+        }
+    }
+    // A relative exe sits in the game's folder; then it tells nothing.
+    (exe.filter(|e| e.is_absolute()), prefix)
+}
+
 pub fn games() -> Vec<Game> {
     let mut out = Vec::new();
     for (root, flatpak) in roots() {
@@ -56,7 +100,7 @@ pub fn games() -> Vec<Game> {
         ) else {
             continue;
         };
-        let Ok(mut st) = db.prepare("SELECT id, name, slug, runner, directory, playtime, lastplayed, service FROM games WHERE installed = 1") else { continue };
+        let Ok(mut st) = db.prepare("SELECT id, name, slug, runner, directory, playtime, lastplayed, service, configpath FROM games WHERE installed = 1") else { continue };
         let rows = st.query_map([], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
@@ -67,6 +111,7 @@ pub fn games() -> Vec<Game> {
                 r.get::<_, Option<f64>>(5)?,
                 r.get::<_, Option<i64>>(6)?,
                 r.get::<_, Option<String>>(7)?,
+                r.get::<_, Option<String>>(8)?,
             ))
         });
         let Ok(rows) = rows else { continue };
@@ -76,7 +121,7 @@ pub fn games() -> Vec<Game> {
             .map(|d| d.join("icons/hicolor/128x128/apps"))
             .into_iter()
             .collect();
-        for (id, name, slug, runner, dir, play, last, service) in rows.flatten() {
+        for (id, name, slug, runner, dir, play, last, service, conf) in rows.flatten() {
             // Steam games Lutris only links to are listed from Steam itself.
             if service.as_deref() == Some("steam") || runner.as_deref() == Some("steam") {
                 continue;
@@ -100,6 +145,19 @@ pub fn games() -> Vec<Game> {
                 ]
             };
             let banner = image(&banners, &slug);
+            let (exe, prefix) = conf
+                .as_deref()
+                .map(|c| game_config(&root, flatpak, c))
+                .unwrap_or_default();
+            let prefix = prefix.or_else(|| {
+                (runner.as_deref() == Some("wine"))
+                    .then(|| dirs::home_dir().map(|h| h.join(".wine")))
+                    .flatten()
+            });
+            let dir = dir
+                .filter(|d| !d.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| exe.as_ref().and_then(|e| e.parent()).map(Path::to_path_buf));
             let play = (play.unwrap_or(0.0) * 60.0).round() as u64;
             out.push(Game {
                 key: format!("lutris:{id}"),
@@ -107,6 +165,7 @@ pub fn games() -> Vec<Game> {
                 source: Source::Lutris,
                 sub: runner,
                 art: Arts {
+                    landscape_alt: None,
                     portrait_alt: None,
                     portrait: image(&covers, &slug),
                     landscape: banner.clone(),
@@ -117,7 +176,12 @@ pub fn games() -> Vec<Game> {
                 playtime_min: (play > 0).then_some(play),
                 last_played: last.filter(|&l| l > 0).map(|l| l as u64),
                 steam_appid: None,
-                install_dir: dir.filter(|d| !d.is_empty()).map(PathBuf::from),
+                store_appid: None,
+                installed: true,
+                compat_id: None,
+                emu: None,
+                prefix: prefix.filter(|p| p.is_dir()),
+                install_dir: dir,
                 launch,
             });
         }

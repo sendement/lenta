@@ -2,10 +2,71 @@
 //! bars and chips.
 
 use egui::{
-    Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
+    Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 
+use crate::game::Source;
 use crate::input::PadKind;
+
+/// Each launcher's own colours, for its tab and badges: Steam's blue,
+/// Heroic's violet, Lutris's orange.
+pub fn source_colors(s: Source) -> (Color32, Color32) {
+    match s {
+        Source::Steam => (
+            Color32::from_rgb(0x1a, 0x9f, 0xff),
+            Color32::from_rgb(0x1a, 0x44, 0xc2),
+        ),
+        Source::Heroic => (
+            Color32::from_rgb(0xb0, 0x5c, 0xff),
+            Color32::from_rgb(0x4f, 0x3b, 0xd6),
+        ),
+        Source::Lutris => (
+            Color32::from_rgb(0xff, 0xa2, 0x1c),
+            Color32::from_rgb(0xe8, 0x50, 0x1e),
+        ),
+    }
+}
+
+/// A rounded rectangle filled left to right from `a` to `b`, its edge
+/// softened over a pixel.
+pub fn gradient_pill(p: &Painter, r: Rect, radius: f32, a: Color32, b: Color32) {
+    use std::f32::consts::FRAC_PI_2;
+    let rad = radius.min(r.width() / 2.0).min(r.height() / 2.0).max(0.0);
+    let corners = [
+        (pos2(r.right() - rad, r.bottom() - rad), 0.0),
+        (pos2(r.left() + rad, r.bottom() - rad), FRAC_PI_2),
+        (pos2(r.left() + rad, r.top() + rad), 2.0 * FRAC_PI_2),
+        (pos2(r.right() - rad, r.top() + rad), 3.0 * FRAC_PI_2),
+    ];
+    let mut edge: Vec<(Pos2, Vec2)> = Vec::new();
+    for (c, a0) in corners {
+        for k in 0..=8 {
+            let ang = a0 + FRAC_PI_2 * k as f32 / 8.0;
+            let n = vec2(ang.cos(), ang.sin());
+            edge.push((c + n * rad, n));
+        }
+    }
+    let color = |x: f32| {
+        let t = ((x - r.left()) / r.width().max(1.0)).clamp(0.0, 1.0);
+        crate::ui::card::lerp(a, b, t)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(r.center(), color(r.center().x));
+    for (q, _) in &edge {
+        mesh.colored_vertex(*q, color(q.x));
+    }
+    for (q, n) in &edge {
+        mesh.colored_vertex(*q + *n * 1.0, Color32::TRANSPARENT);
+    }
+    let n = edge.len() as u32;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        mesh.add_triangle(0, 1 + i, 1 + j);
+        mesh.add_triangle(1 + i, 1 + n + i, 1 + n + j);
+        mesh.add_triangle(1 + i, 1 + n + j, 1 + j);
+    }
+    p.add(mesh);
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Btn {
@@ -342,9 +403,10 @@ pub fn bar(p: &Painter, rect: Rect, frac: f32, c1: Color32, c2: Color32) {
     p.rect_filled(rect, rect.height() / 2.0, Color32::from_white_alpha(30));
     let w = rect.width() * frac.clamp(0.0, 1.0);
     if w > 0.5 {
-        gradient_rect(
+        gradient_pill(
             p,
             Rect::from_min_size(rect.min, vec2(w, rect.height())),
+            rect.height() / 2.0,
             c1,
             c2,
         );
@@ -376,11 +438,11 @@ pub fn vgradient(p: &Painter, r: Rect, top: Color32, bottom: Color32) {
 }
 
 /// A rounded label.
-pub fn chip(ui: &Ui, p: &Painter, at: Pos2, text: &str, fill: Color32, size: f32) -> Rect {
-    let _ = ui;
+/// A label on a pill filled with the gradient `fill`.
+pub fn chip(p: &Painter, at: Pos2, text: &str, fill: (Color32, Color32), size: f32) -> Rect {
     let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(size), Color32::WHITE);
     let r = Rect::from_min_size(at, galley.size() + vec2(size * 1.1, size * 0.6));
-    p.rect_filled(r, r.height() / 2.0, fill);
+    gradient_pill(p, r, r.height() / 2.0, fill.0, fill.1);
     p.galley(
         r.min + vec2(size * 0.55, size * 0.3),
         galley,

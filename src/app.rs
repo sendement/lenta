@@ -67,6 +67,7 @@ pub enum Tab {
     Overview,
     Achievements,
     Screenshots,
+    Compat,
 }
 
 pub struct GameView {
@@ -81,6 +82,8 @@ pub struct GameView {
     /// A screenshot shown big.
     pub shot: Option<usize>,
     pub shot_sel: usize,
+    /// The row in the compatibility tab.
+    pub tool_sel: usize,
     pub opened: Instant,
 }
 
@@ -98,6 +101,9 @@ pub struct SettingsState {
 struct Scan {
     games: Vec<Game>,
     apps: Vec<desktop::App>,
+    steam: crate::ui::steam::SteamData,
+    /// The final word (after the network pass).
+    last: bool,
 }
 
 pub struct App {
@@ -105,7 +111,12 @@ pub struct App {
     pub cfg: Config,
     saved: Config,
     changed_at: Option<Instant>,
+    /// Installed games, for the ribbon (the hidden collection left out).
     pub games: Vec<Game>,
+    /// Steam's collections, tools and the account's other games.
+    pub steam: crate::ui::steam::SteamData,
+    /// Signing in to Steam, while its window is up.
+    pub login: Option<crate::ui::steam::Login>,
     pub apps: Vec<desktop::App>,
     pub scanning: bool,
     scan_tx: Sender<Scan>,
@@ -130,6 +141,9 @@ pub struct App {
     pub toast: Option<(String, Instant)>,
     /// The accent as drawn (eases towards the target).
     pub accent: (Color32, Color32),
+    /// The background's glow colours: the accent, or a launcher's own on
+    /// its library tab; and how far they are the launcher's (0…1).
+    pub tone: (Color32, Color32, f32),
     /// Backgrounds cross-fading: (art, opacity).
     pub bgs: Vec<((Art, Kind), f32)>,
     last_frame: Option<Instant>,
@@ -154,6 +168,8 @@ impl App {
             cfg,
             changed_at: None,
             games: Vec::new(),
+            steam: Default::default(),
+            login: None,
             apps: Vec::new(),
             scanning: false,
             scan_tx,
@@ -176,6 +192,11 @@ impl App {
                 Color32::from_rgb(0x4c, 0x9a, 0xff),
                 Color32::from_rgb(0xc0, 0x4c, 0xff),
             ),
+            tone: (
+                Color32::from_rgb(0x4c, 0x9a, 0xff),
+                Color32::from_rgb(0xc0, 0x4c, 0xff),
+                0.0,
+            ),
             bgs: Vec::new(),
             last_frame: None,
             dt: 0.016,
@@ -197,10 +218,25 @@ impl App {
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
             let apps = std::thread::spawn(desktop::apps);
-            let games = sources::scan(&cfg);
+            let mut games = sources::scan(&cfg);
+            let apps = apps.join().unwrap_or_default();
+            let mut steam = crate::ui::steam::SteamData::local(&cfg);
+            // What's on disk shows at once; store matches, the account's
+            // other games and art follow.
+            let _ = tx.send(Scan {
+                games: games.clone(),
+                apps: apps.clone(),
+                steam: steam.clone(),
+                last: false,
+            });
+            ctx.request_repaint();
+            sources::web::enrich(&mut games);
+            steam.online(&cfg, &mut games);
             let _ = tx.send(Scan {
                 games,
-                apps: apps.join().unwrap_or_default(),
+                apps,
+                steam,
+                last: true,
             });
             ctx.request_repaint();
         });
@@ -208,10 +244,43 @@ impl App {
 
     fn take_scan(&mut self) {
         while let Ok(s) = self.scan_rx.try_recv() {
-            self.scanning = false;
+            if s.last {
+                self.scanning = false;
+            }
             let keep = self.games.get(self.home.sel).map(|g| g.key.clone());
-            self.games = s.games;
+            // Games in the hidden collection stay out of the ribbon.
+            let hidden = s.steam.hidden();
+            let (shown, hidden): (Vec<Game>, Vec<Game>) = s
+                .games
+                .into_iter()
+                .partition(|g| g.steam_appid.is_none_or(|id| !hidden.contains(&id)));
+            self.games = shown;
             sources::sort(&mut self.games, self.cfg.sort);
+            // Changes still waiting on Steam outlive the rescan.
+            let pending = std::mem::take(&mut self.steam.pending);
+            let restart = self.steam.restart.take();
+            let more = std::mem::take(&mut self.steam.more);
+            let first = !s.last;
+            self.steam = s.steam;
+            for (id, t) in &pending {
+                match t {
+                    Some(t) => self.steam.mapping.insert(*id, t.clone()),
+                    None => self.steam.mapping.remove(id),
+                };
+            }
+            self.steam.pending = pending;
+            self.steam.restart = restart;
+            // The quick pass has no account games yet: keep the last ones.
+            if first && self.steam.more.is_empty() {
+                self.steam.more = more.into_iter().filter(|g| !g.installed).collect();
+            }
+            self.steam.more.extend(hidden);
+            if s.last {
+                self.apply_pending_tools(false);
+                if let Some(e) = self.steam.error.take() {
+                    self.toast(format!("{}: {e}", tr("owned_failed")));
+                }
+            }
             self.apps = s.apps;
             if let Some(k) = keep
                 && let Some(i) = self.games.iter().position(|g| g.key == k)
@@ -238,7 +307,10 @@ impl App {
     }
 
     pub fn game_by_key(&self, key: &str) -> Option<&Game> {
-        self.games.iter().find(|g| g.key == key)
+        self.games
+            .iter()
+            .chain(&self.steam.more)
+            .find(|g| g.key == key)
     }
 
     pub fn toast(&mut self, s: impl Into<String>) {
@@ -250,8 +322,13 @@ impl App {
             return;
         };
         let title = g.title.clone();
+        let verb = if g.installed {
+            tr("launching")
+        } else {
+            tr("installing")
+        };
         match g.play() {
-            Ok(()) => self.toast(format!("{} {title}…", tr("launching"))),
+            Ok(()) => self.toast(format!("{verb} {title}…")),
             Err(e) => self.toast(format!("{} {title}: {e}", tr("launch_failed"))),
         }
     }
@@ -266,6 +343,7 @@ impl App {
             max_scroll: 0.0,
             shot: None,
             shot_sel: 0,
+            tool_sel: 0,
             opened: Instant::now(),
         });
     }
@@ -289,7 +367,7 @@ impl App {
             let g = app.games.iter().find(|g| g.key == key)?.clone();
             let arts = crate::ui::ribbon::arts(&g, app.cfg.shape);
             app.images
-                .first(&arts, Kind::Fit(crate::ui::ribbon::CARD_PX))
+                .first(&arts, crate::ui::ribbon::card_kind())
                 .map(|t| (t.color, t.color2))
                 .or_else(|| {
                     Some(crate::ui::ribbon::own_colors(&g.title)).map(|(a, b)| (lift(a), lift(b)))
@@ -351,6 +429,10 @@ impl App {
     }
 
     pub(crate) fn handle(&mut self, a: Action) {
+        if self.login.is_some() {
+            self.login_input(a);
+            return;
+        }
         if self.game.is_some() {
             self.game_input(a);
             return;
@@ -409,13 +491,29 @@ impl App {
     }
 
     pub fn hint_items(&self) -> Vec<(Btn, &'static str)> {
+        if let Some(l) = &self.login {
+            let mut v = vec![(Btn::B, tr("back"))];
+            if l.failed() {
+                v.insert(0, (Btn::A, tr("retry")));
+            }
+            return v;
+        }
         if let Some(v) = &self.game {
             if v.shot.is_some() {
                 return vec![(Btn::Dpad, tr("scroll")), (Btn::B, tr("back"))];
             }
-            let mut v = vec![(Btn::A, if v.focus == 0 { tr("play") } else { tr("open") })];
+            let installed = self.game_by_key(&v.key).is_none_or(|g| g.installed);
+            let play = if installed { tr("play") } else { tr("install") };
+            if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Compat {
+                return vec![
+                    (Btn::A, tr("choose")),
+                    (Btn::Dpad, tr("scroll")),
+                    (Btn::B, tr("back")),
+                ];
+            }
+            let mut v = vec![(Btn::A, if v.focus == 0 { play } else { tr("open") })];
             if self.game.as_ref().is_some_and(|g| g.focus != 0) {
-                v.push((Btn::X, tr("play")));
+                v.push((Btn::X, play));
             }
             v.extend([
                 (Btn::Dpad, tr("scroll")),
@@ -493,6 +591,7 @@ impl App {
             || self.bgs.len() > 1
             || self.toast.is_some()
             || self.scanning
+            || self.steam.restart.is_some()
     }
 
     pub fn ease(&self, rate: f32) -> f32 {
@@ -509,8 +608,10 @@ fn lift(c: Color32) -> Color32 {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.frame_pacing();
+        crate::ui::ribbon::size_cards(&self.cfg, ui.ctx().pixels_per_point());
         let ctx = ui.ctx().clone();
         self.take_scan();
+        self.pump_restart();
         self.images.pump();
         self.store.pump();
         // The pad is read globally; never act on it while another window
@@ -624,6 +725,9 @@ impl eframe::App for App {
                         ),
                         hints_h,
                     );
+                }
+                if self.login.is_some() {
+                    self.draw_login(ui, full);
                 }
                 self.draw_toast(ui, full);
             });

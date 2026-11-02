@@ -55,19 +55,51 @@ impl App {
     /// fading into the next; accent glows over a dark base.
     pub fn draw_background(&mut self, ui: &mut Ui, full: Rect) {
         let p = ui.painter_at(full);
-        let (c1, c2) = self.accent;
-        p.rect_filled(full, 0.0, Color32::from_rgb(10, 11, 16));
+        // A launcher's tab in the library tints the page in its colours.
+        let source = (self.page == crate::app::Page::Library && self.game.is_none())
+            .then(|| match self.lib_filter() {
+                super::library::LibFilter::Source(s) => Some(s),
+                super::library::LibFilter::Collection(_) => Some(crate::game::Source::Steam),
+                _ => None,
+            })
+            .flatten();
+        let target = match source {
+            Some(s) => {
+                let (a, b) = widgets::source_colors(s);
+                (a, b, 1.0)
+            }
+            None => (self.accent.0, self.accent.1, 0.0),
+        };
+        let k = self.ease(6.0);
+        self.tone = (
+            card::lerp(self.tone.0, target.0, k),
+            card::lerp(self.tone.1, target.1, k),
+            self.tone.2 + (target.2 - self.tone.2) * k,
+        );
+        if (self.tone.0, self.tone.1) != (target.0, target.1)
+            || (self.tone.2 - target.2).abs() > 0.002
+        {
+            ui.ctx().request_repaint();
+        }
+        let (c1, c2, themed) = self.tone;
+        // Deep in the launcher's hue, not just black.
+        let base = card::lerp(
+            Color32::from_rgb(10, 11, 16),
+            card::lerp(c2, Color32::BLACK, 0.88),
+            themed,
+        );
+        p.rect_filled(full, 0.0, base);
         blob(
             &p,
             full.left_bottom() + vec2(full.width() * 0.15, 0.0),
-            full.width() * 0.6,
-            c1.gamma_multiply(0.22),
+            full.width() * (0.6 + 0.15 * themed),
+            c1.gamma_multiply(0.22 + 0.12 * themed),
         );
         blob(
             &p,
             full.right_top() + vec2(-full.width() * 0.1, full.height() * 0.1),
-            full.width() * 0.5,
-            c2.gamma_multiply(0.16),
+            full.width() * (0.5 + 0.1 * themed),
+            c2.gamma_multiply(0.16 + 0.12 * themed),
         );
 
         let show = self.cfg.bg_hero && (self.game.is_some() || self.page == crate::app::Page::Home);
@@ -328,14 +360,7 @@ impl App {
             Some(s) => format!("{} · {s}", g.source.name()),
             None => g.source.name().to_string(),
         };
-        let chip = widgets::chip(
-            ui,
-            &p,
-            pos2(x, y),
-            &src,
-            card::lerp(c1, Color32::BLACK, 0.45).gamma_multiply(0.9),
-            15.0,
-        );
+        let chip = widgets::chip(&p, pos2(x, y), &src, widgets::source_colors(g.source), 15.0);
         x = chip.right() + 18.0;
         let line_c = chip.center().y;
         let meta = FontId::proportional(17.0);
@@ -361,9 +386,7 @@ impl App {
             );
             x = r.right() + 22.0;
         }
-        if let Some(appid) = g.steam_appid
-            && let State::Ready(list) = self.store.achievements(appid)
-        {
+        if let State::Ready(list) = self.store.achievements(&g) {
             let got = list.iter().filter(|a| a.unlocked.is_some()).count();
             let total = list.len();
             widgets::icon(&p, pos2(x + 9.0, line_c), 18.0, Icon::Trophy, text_c);
@@ -379,7 +402,7 @@ impl App {
         }
         y = chip.bottom() + 14.0;
         // A few lines from the store, once the choice settles.
-        if let Some(appid) = g.steam_appid {
+        if let Some(appid) = g.info_appid() {
             let settled = (self.home.pos - self.home.sel as f32).abs() < 0.05;
             if settled && let State::Ready(d) = self.store.details(appid) {
                 let room = rect.bottom() - y;

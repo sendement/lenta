@@ -13,7 +13,8 @@ use crate::input::Action;
 use crate::sources::steam::Achievement;
 use crate::store::State;
 
-const TABS: [Tab; 3] = [Tab::Overview, Tab::Achievements, Tab::Screenshots];
+/// Focus inside the tab's content (the screenshots, the tool list).
+pub const INSIDE: usize = 9;
 const SHOT_COLS: usize = 3;
 
 impl App {
@@ -25,7 +26,7 @@ impl App {
     }
 
     fn shot_count(&mut self) -> usize {
-        let Some(id) = self.page_game().and_then(|g| g.steam_appid) else {
+        let Some(id) = self.page_game().and_then(|g| g.info_appid()) else {
             return 0;
         };
         match self.store.details(id) {
@@ -34,8 +35,33 @@ impl App {
         }
     }
 
+    /// The tabs this game has: compatibility only for Steam's.
+    pub fn tabs_of(&self, g: &Game) -> Vec<Tab> {
+        let mut v = vec![Tab::Overview, Tab::Achievements, Tab::Screenshots];
+        if g.compat_id.is_some() && !self.steam.tools.is_empty() {
+            v.push(Tab::Compat);
+        }
+        v
+    }
+
+    /// Rows in the compatibility tab: the tools, then "Restart Steam"
+    /// while changes wait.
+    fn tool_rows(&self) -> usize {
+        self.tool_choices().len() + usize::from(!self.steam.pending.is_empty())
+    }
+
     pub fn game_input(&mut self, a: Action) {
         let shots = self.shot_count();
+        let Some(g) = self.page_game() else { return };
+        let tabs = self.tabs_of(&g);
+        let rows = self.tool_rows();
+        let choices = self.tool_choices();
+        // The row of the tool in use, to start the list on.
+        let cur_tool = g
+            .compat_id
+            .map(|id| self.steam.mapping.get(&id).cloned())
+            .and_then(|cur| choices.iter().position(|c| c.0 == cur))
+            .unwrap_or(0);
         let Some(v) = self.game.as_mut() else { return };
         // A screenshot shown big.
         if let Some(i) = v.shot {
@@ -50,11 +76,33 @@ impl App {
             }
             return;
         }
-        let in_shots = v.focus == 4;
+        let tab_i = tabs.iter().position(|t| *t == v.tab).unwrap_or(0);
+        let inside = v.focus == INSIDE;
+        // The compatibility list.
+        if inside && v.tab == Tab::Compat {
+            match a {
+                Action::Up if v.tool_sel == 0 => v.focus = tab_i + 1,
+                Action::Up => v.tool_sel -= 1,
+                Action::Down => v.tool_sel = (v.tool_sel + 1).min(rows.saturating_sub(1)),
+                Action::Back => v.focus = tab_i + 1,
+                Action::Accept => {
+                    let sel = v.tool_sel;
+                    if sel < choices.len() {
+                        if let Some(id) = g.compat_id {
+                            self.choose_tool(id, choices[sel].0.clone());
+                        }
+                    } else {
+                        self.restart_steam();
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         match a {
             Action::Back => {
-                if in_shots {
-                    v.focus = 3;
+                if inside {
+                    v.focus = tab_i + 1;
                 } else {
                     self.game = None;
                 }
@@ -64,58 +112,62 @@ impl App {
                 self.play(&k);
             }
             Action::LeftTrigger | Action::RightTrigger => {
-                let i = TABS.iter().position(|t| *t == v.tab).unwrap_or(0);
+                let n = tabs.len();
                 let j = if a == Action::RightTrigger {
-                    (i + 1) % 3
+                    (tab_i + 1) % n
                 } else {
-                    (i + 2) % 3
+                    (tab_i + n - 1) % n
                 };
-                v.tab = TABS[j];
+                v.tab = tabs[j];
                 v.scroll = 0.0;
                 if v.focus >= 1 {
                     v.focus = j + 1;
                 }
             }
-            Action::Left if in_shots => v.shot_sel = v.shot_sel.saturating_sub(1),
-            Action::Right if in_shots => v.shot_sel = (v.shot_sel + 1).min(shots.saturating_sub(1)),
-            Action::Up if in_shots => {
+            Action::Left if inside => v.shot_sel = v.shot_sel.saturating_sub(1),
+            Action::Right if inside => v.shot_sel = (v.shot_sel + 1).min(shots.saturating_sub(1)),
+            Action::Up if inside => {
                 if v.shot_sel < SHOT_COLS {
-                    v.focus = 3;
+                    v.focus = tab_i + 1;
                 } else {
                     v.shot_sel -= SHOT_COLS;
                 }
             }
-            Action::Down if in_shots => {
+            Action::Down if inside => {
                 if v.shot_sel + SHOT_COLS < shots {
                     v.shot_sel += SHOT_COLS;
                 }
             }
-            Action::Accept if in_shots => v.shot = Some(v.shot_sel),
+            Action::Accept if inside => v.shot = Some(v.shot_sel),
             Action::Left => v.focus = v.focus.saturating_sub(1),
-            Action::Right => v.focus = (v.focus + 1).min(3),
+            Action::Right => v.focus = (v.focus + 1).min(tabs.len()),
             Action::Up => v.scroll = (v.scroll - 160.0).max(0.0),
-            Action::Down => {
-                if v.tab == Tab::Screenshots && shots > 0 {
-                    v.focus = 4;
-                } else {
-                    v.scroll = (v.scroll + 160.0).min(v.max_scroll);
+            Action::Down => match v.tab {
+                Tab::Screenshots if shots > 0 => v.focus = INSIDE,
+                Tab::Compat => {
+                    v.focus = INSIDE;
+                    v.tool_sel = cur_tool;
                 }
-            }
+                _ => v.scroll = (v.scroll + 160.0).min(v.max_scroll),
+            },
             Action::Accept => {
                 if v.focus == 0 {
                     let k = v.key.clone();
                     self.play(&k);
                 } else if v.tab == Tab::Screenshots && shots > 0 {
-                    v.focus = 4;
+                    v.focus = INSIDE;
+                } else if v.tab == Tab::Compat {
+                    v.focus = INSIDE;
+                    v.tool_sel = cur_tool;
                 }
             }
             _ => {}
         }
         if let Some(v) = self.game.as_mut()
-            && (1..=3).contains(&v.focus)
-            && v.tab != TABS[v.focus - 1]
+            && (1..=tabs.len()).contains(&v.focus)
+            && v.tab != tabs[v.focus - 1]
         {
-            v.tab = TABS[v.focus - 1];
+            v.tab = tabs[v.focus - 1];
             v.scroll = 0.0;
         }
     }
@@ -193,11 +245,10 @@ impl App {
             None => g.source.name().to_string(),
         };
         let chip = widgets::chip(
-            ui,
             &p,
             pos2(mx, y),
             &src,
-            card::lerp(c1, Color32::BLACK, 0.45),
+            widgets::source_colors(g.source),
             15.0,
         );
         mx = chip.right() + 18.0;
@@ -227,10 +278,10 @@ impl App {
         );
 
         // Buttons: Play and the tabs.
-        let ach = g.steam_appid.map(|id| match self.store.achievements(id) {
+        let ach = match self.store.achievements(&g) {
             State::Ready(l) => Some((l.iter().filter(|a| a.unlocked.is_some()).count(), l.len())),
             _ => None,
-        });
+        };
         let row_y = head_bottom + 28.0;
         let focus = self.game.as_ref().map(|v| v.focus).unwrap_or(0);
         let tab = self.game.as_ref().map(|v| v.tab).unwrap_or(Tab::Overview);
@@ -259,7 +310,11 @@ impl App {
         p.text(
             pos2(play_r.left() + 64.0, play_r.center().y),
             Align2::LEFT_CENTER,
-            tr("play"),
+            if g.installed {
+                tr("play")
+            } else {
+                tr("install")
+            },
             FontId::proportional(24.0),
             Color32::WHITE,
         );
@@ -268,10 +323,11 @@ impl App {
             self.play(&k);
         }
         let mut tx = play_r.right() + 28.0;
-        for (i, t) in TABS.iter().enumerate() {
+        for (i, t) in self.tabs_of(&g).iter().enumerate() {
             let label = match t {
+                Tab::Compat => tr("compat").to_string(),
                 Tab::Overview => tr("overview").to_string(),
-                Tab::Achievements => match ach.flatten() {
+                Tab::Achievements => match ach {
                     Some((a, b)) => format!("{} {a}/{b}", tr("achievements")),
                     None => tr("achievements").to_string(),
                 },
@@ -340,6 +396,7 @@ impl App {
             Tab::Overview => self.draw_overview(ui, body, &g, eased),
             Tab::Achievements => self.draw_achievements(ui, body, &g, eased),
             Tab::Screenshots => self.draw_shots(ui, body, &g, eased),
+            Tab::Compat => self.draw_compat(ui, body, &g, eased),
         };
         if let Some(v) = self.game.as_mut() {
             v.max_scroll = (content_h - body.height() + 24.0).max(0.0);
@@ -363,7 +420,7 @@ impl App {
         if let Some(m) = g.playtime_min {
             facts.push((tr("playtime"), i18n::duration(m)));
         }
-        match g.steam_appid.map(|id| self.store.details(id)) {
+        match g.info_appid().map(|id| self.store.details(id)) {
             Some(State::Ready(d)) => {
                 let d = d.clone();
                 if !d.short.is_empty() {
@@ -478,7 +535,7 @@ impl App {
     fn draw_achievements(&mut self, ui: &mut Ui, body: Rect, g: &Game, scroll: f32) -> f32 {
         let p = ui.painter_at(body);
         let (c1, c2) = self.accent;
-        let list: Vec<Achievement> = match g.steam_appid.map(|id| self.store.achievements(id)) {
+        let list: Vec<Achievement> = match Some(self.store.achievements(g)) {
             Some(State::Ready(l)) => l.clone(),
             Some(State::Loading) => {
                 p.text(
@@ -532,7 +589,12 @@ impl App {
             (Some(x), Some(y)) => y.cmp(&x),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => a.hidden.cmp(&b.hidden),
+            // Not yet: the common ones first, the secret ones last.
+            (None, None) => a.hidden.cmp(&b.hidden).then(
+                b.percent
+                    .unwrap_or(0.0)
+                    .total_cmp(&a.percent.unwrap_or(0.0)),
+            ),
         });
         let row_h = 84.0;
         for a in &sorted {
@@ -592,14 +654,28 @@ impl App {
                 let dg = p.fonts_mut(|f| f.layout_job(job));
                 p.galley(pos2(tx, r.top() + 38.0), dg, Color32::WHITE);
             }
-            if let Some(t) = a.unlocked.filter(|t| *t > 0) {
+            // When it was earned, and how many players have it.
+            let when = a.unlocked.filter(|t| *t > 0).map(date);
+            let share = a.percent.map(|v| {
+                let n = format!("{v:.1}");
+                let n = if i18n::ru() { n.replace('.', ",") } else { n };
+                format!("{n}% {}", tr("of_players"))
+            });
+            let lines: Vec<(String, f32, u8)> = [(when, 15.0, 190), (share, 13.0, 140)]
+                .into_iter()
+                .filter_map(|(t, size, gray)| Some((t?, size, gray)))
+                .collect();
+            let step = 22.0;
+            let mut ly = r.center().y - step * (lines.len() as f32 - 1.0) / 2.0;
+            for (text, size, gray) in lines {
                 p.text(
-                    pos2(r.right() - 18.0, r.center().y),
+                    pos2(r.right() - 18.0, ly),
                     Align2::RIGHT_CENTER,
-                    date(t),
-                    FontId::proportional(15.0),
-                    Color32::from_gray(190),
+                    text,
+                    FontId::proportional(size),
+                    Color32::from_gray(gray),
                 );
+                ly += step;
             }
         }
         y - (body.top() - scroll)
@@ -607,7 +683,7 @@ impl App {
 
     fn draw_shots(&mut self, ui: &mut Ui, body: Rect, g: &Game, scroll: f32) -> f32 {
         let p = ui.painter_at(body);
-        let shots = match g.steam_appid.map(|id| self.store.details(id)) {
+        let shots = match g.info_appid().map(|id| self.store.details(id)) {
             Some(State::Ready(d)) => d.shots.clone(),
             Some(State::Loading) => {
                 p.text(
@@ -640,7 +716,7 @@ impl App {
         let w = (body.width() - gap * (SHOT_COLS - 1) as f32) / SHOT_COLS as f32;
         let h = w * 9.0 / 16.0;
         // Keep the chosen one in view.
-        if focus == 4 {
+        if focus == INSIDE {
             let row_top = (sel / SHOT_COLS) as f32 * (h + gap);
             if let Some(v) = self.game.as_mut() {
                 if row_top < v.scroll {
@@ -669,7 +745,7 @@ impl App {
                     p.rect_filled(r, 10.0, Color32::from_white_alpha(14));
                 }
             }
-            if focus == 4 && sel == i {
+            if focus == INSIDE && sel == i {
                 p.rect_stroke(r, 6.0, Stroke::new(3.0, self.accent.0), StrokeKind::Outside);
             }
             if resp.clicked() {
@@ -679,17 +755,148 @@ impl App {
         if let (Some(i), Some(v)) = (open, self.game.as_mut()) {
             v.shot = Some(i);
             v.shot_sel = i;
-            v.focus = 4;
+            v.focus = INSIDE;
         }
         let rows = shots.len().div_ceil(SHOT_COLS);
         rows as f32 * (h + gap)
+    }
+
+    /// The compatibility tools as a list: the one in use marked, the
+    /// focused one framed; a note and "Restart Steam" while a change waits.
+    fn draw_compat(&mut self, ui: &mut Ui, body: Rect, g: &Game, scroll: f32) -> f32 {
+        let Some(id) = g.compat_id else { return 0.0 };
+        let p = ui.painter_at(body);
+        let (c1, c2) = self.accent;
+        let choices = self.tool_choices();
+        let cur = self.steam.mapping.get(&id).cloned();
+        let pending = !self.steam.pending.is_empty();
+        let (focus, sel) = self
+            .game
+            .as_ref()
+            .map(|v| (v.focus, v.tool_sel))
+            .unwrap_or((0, 0));
+        let mut y = body.top() - scroll;
+        let note = p.layout(
+            tr("tool_note").to_string(),
+            FontId::proportional(15.0),
+            Color32::from_gray(150),
+            body.width().min(820.0),
+        );
+        let note_h = note.size().y;
+        p.galley(pos2(body.left(), y), note, Color32::WHITE);
+        y += note_h + 18.0;
+        let row_h = 52.0;
+        let w = body.width().min(620.0);
+        let mut chosen = None;
+        let mut restart = false;
+        let n = choices.len() + usize::from(pending);
+        for i in 0..n {
+            let r = Rect::from_min_size(pos2(body.left(), y), vec2(w, row_h - 8.0));
+            y += row_h;
+            // Keep the focused row in view.
+            if focus == INSIDE && i == sel {
+                let top = r.top() + scroll - body.top();
+                if let Some(v) = self.game.as_mut() {
+                    if r.bottom() > body.bottom() {
+                        v.scroll = (top + row_h - body.height()).max(0.0);
+                    } else if r.top() < body.top() {
+                        v.scroll = top.max(0.0);
+                    }
+                }
+            }
+            if r.bottom() < body.top() || r.top() > body.bottom() {
+                continue;
+            }
+            let resp = ui.interact(r, ui.id().with(("tool", i)), Sense::click());
+            let is_restart = i == choices.len();
+            let on = !is_restart && choices[i].0 == cur;
+            p.rect_filled(
+                r,
+                12.0,
+                if on {
+                    Color32::from_white_alpha(34)
+                } else if resp.hovered() {
+                    Color32::from_white_alpha(20)
+                } else {
+                    Color32::from_black_alpha(90)
+                },
+            );
+            if focus == INSIDE && i == sel {
+                p.rect_stroke(r, 12.0, Stroke::new(2.5, c1), StrokeKind::Inside);
+            }
+            if is_restart {
+                widgets::gradient_pill(
+                    &p,
+                    Rect::from_min_size(r.left_center() + vec2(16.0, -9.0), vec2(18.0, 18.0)),
+                    9.0,
+                    c1,
+                    c2,
+                );
+                p.text(
+                    r.left_center() + vec2(48.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    if self.steam.restart.is_some() {
+                        tr("steam_restarting")
+                    } else {
+                        tr("restart_steam")
+                    },
+                    FontId::proportional(17.0),
+                    Color32::WHITE,
+                );
+            } else {
+                // A dot for the one in use.
+                if on {
+                    p.circle_filled(r.left_center() + vec2(25.0, 0.0), 6.0, c1);
+                } else {
+                    p.circle_stroke(
+                        r.left_center() + vec2(25.0, 0.0),
+                        6.0,
+                        Stroke::new(1.5, Color32::from_gray(120)),
+                    );
+                }
+                p.text(
+                    r.left_center() + vec2(48.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    &choices[i].1,
+                    FontId::proportional(17.0),
+                    Color32::from_gray(if on { 255 } else { 205 }),
+                );
+                if on && self.has_pending(id) {
+                    p.text(
+                        r.right_center() - vec2(16.0, 0.0),
+                        Align2::RIGHT_CENTER,
+                        tr("tool_waiting"),
+                        FontId::proportional(14.0),
+                        Color32::from_gray(180),
+                    );
+                }
+            }
+            if resp.clicked() {
+                if is_restart {
+                    restart = true;
+                } else {
+                    chosen = Some(choices[i].0.clone());
+                }
+                if let Some(v) = self.game.as_mut() {
+                    v.focus = INSIDE;
+                    v.tool_sel = i;
+                }
+            }
+        }
+        if let Some(t) = chosen {
+            self.choose_tool(id, t);
+        }
+        if restart {
+            self.restart_steam();
+        }
+        note_h + 18.0 + n as f32 * row_h
     }
 
     fn draw_big_shot(&mut self, ui: &mut Ui, area: Rect, g: &Game) {
         let Some(i) = self.game.as_ref().and_then(|v| v.shot) else {
             return;
         };
-        let Some(id) = g.steam_appid else { return };
+        let Some(id) = g.info_appid() else { return };
         let full = match self.store.details(id) {
             State::Ready(d) => d.shots.get(i).map(|s| s.1.clone()),
             _ => None,

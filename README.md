@@ -19,10 +19,34 @@ A gamepad-first game launcher for Linux, written in Rust with egui.
 | Source | Games | Art | Play time | Extra |
 |---|---|---|---|---|
 | Steam (native, Flatpak) | installed apps from every library, non-Steam shortcuts | `appcache/librarycache`, custom `userdata/*/config/grid`, store CDN | `localconfig.vdf` | achievements from `appcache/stats` (local, no API key), store page via `appdetails` |
-| Heroic (native, Flatpak) | installed Epic, GOG, Amazon, side-loaded | library caches | `store/timestamp.json` | |
-| Lutris (native, Flatpak) | installed games from `pga.db` | covers, banners, icons | `pga.db` | |
+| Heroic (native, Flatpak) | installed Epic, GOG, Amazon, side-loaded | library caches | `store/timestamp.json` | see below |
+| Lutris (native, Flatpak) | installed games from `pga.db` | covers, banners, icons | `pga.db` | see below |
+
+Games from Heroic, Lutris and non-Steam shortcuts are matched to Steam's
+store: by the app id a Steam emulator's files carry (`steam_appid.txt`,
+`steam_emu.ini`, save folders) or else by title. The match brings the store
+description and screenshots, and fills missing art. When the game's Wine
+prefix holds a Steam emulator's achievement save (CODEX, RUNE, EMPRESS,
+Goldberg/GSE, OnlineFix, RLD!…), the Achievements tab shows the full list
+from Steam (`IPlayerService/GetGameAchievements`, no key) with the ones in
+the save marked as earned, and how many Steam players have each.
 
 Planned: Hydra Launcher.
+
+### Steam account and client (optional)
+
+- **Collections** from the Steam client's own files show as library
+  filters; games in "Hidden" stay out of the ribbon.
+- **Compatibility tool** per game (Steam's Protons and those in
+  `compatibilitytools.d`) on the game page's Compatibility tab. Steam
+  rewrites `config.vdf` when it quits, so a change made while it runs waits
+  until it closes, or until "Restart Steam to apply". The old file is kept
+  as `config.vdf.lenta-backup`.
+- **Sign in** (Settings → Steam account) by scanning a QR code with the
+  Steam app, the same sign-in the client uses. Only the refresh token is
+  kept, in `~/.local/share/lenta/steam.json` (mode 0600). With it the
+  library also lists owned games that aren't installed (Play installs
+  them) and play time counted on every device.
 
 Downloads (store pages, art, achievement icons) are kept in `~/.cache/lenta`.
 Settings live in `~/.config/lenta/config.toml`.

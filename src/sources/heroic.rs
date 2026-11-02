@@ -126,6 +126,7 @@ pub fn games() -> Vec<Game> {
                     source: Source::Heroic,
                     sub: Some(store.into()),
                     art: Arts {
+                        landscape_alt: None,
                         portrait_alt: None,
                         portrait: art(&g, "art_square"),
                         landscape: cover.clone(),
@@ -136,6 +137,11 @@ pub fn games() -> Vec<Game> {
                     playtime_min: (play > 0).then_some(play),
                     last_played: (last > 0).then_some(last),
                     steam_appid: None,
+                    store_appid: None,
+                    installed: true,
+                    compat_id: None,
+                    emu: None,
+                    prefix: wine_prefix(&root, app),
                     install_dir: g
                         .pointer("/install/install_path")
                         .and_then(Value::as_str)
@@ -146,4 +152,15 @@ pub fn games() -> Vec<Game> {
         }
     }
     out
+}
+
+/// The game's Wine prefix from Heroic's per-game settings.
+fn wine_prefix(root: &std::path::Path, app: &str) -> Option<PathBuf> {
+    let v = read_json(root.join(format!("GamesConfig/{app}.json")))?;
+    let p = v.get(app)?.get("winePrefix")?.as_str()?;
+    let p = match p.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir()?.join(rest),
+        None => PathBuf::from(p),
+    };
+    p.is_dir().then_some(p)
 }

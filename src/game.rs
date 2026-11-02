@@ -35,8 +35,10 @@ pub struct Arts {
     pub portrait: Option<Art>,
     /// A smaller cover, when the big one has to be fetched (and may fail).
     pub portrait_alt: Option<Art>,
-    /// Wide capsule (460×215).
+    /// Wide capsule (460×215, or twice that from the store).
     pub landscape: Option<Art>,
+    /// The local one, when the wide capsule has to be fetched.
+    pub landscape_alt: Option<Art>,
     /// Background behind the ribbon and the game page.
     pub hero: Option<Art>,
     /// Transparent title logo.
@@ -56,13 +58,32 @@ pub struct Game {
     pub playtime_min: Option<u64>,
     /// Unix seconds.
     pub last_played: Option<u64>,
+    /// Owned on Steam: its stats and art are Steam's own.
     pub steam_appid: Option<u32>,
+    /// The same game in Steam's store, for one from elsewhere: from an
+    /// emulator's files, or found by title. Gives description, art and
+    /// the achievement list.
+    pub store_appid: Option<u32>,
+    /// A Steam emulator's achievement save for it.
+    pub emu: Option<crate::sources::emu::Save>,
+    /// Its Wine prefix, if it runs in one.
+    pub prefix: Option<PathBuf>,
+    /// Owned but not installed (from the Steam account): Play installs it.
+    pub installed: bool,
+    /// The id Steam's compatibility tool setting is kept under (Steam
+    /// games and shortcuts).
+    pub compat_id: Option<u32>,
     pub install_dir: Option<PathBuf>,
     /// Commands to try in turn until one starts.
     pub launch: Vec<Vec<String>>,
 }
 
 impl Game {
+    /// Where its store page lives: its own Steam id, or the match.
+    pub fn info_appid(&self) -> Option<u32> {
+        self.steam_appid.or(self.store_appid)
+    }
+
     pub fn play(&self) -> Result<(), String> {
         run_first(&self.launch)
     }
@@ -85,6 +106,11 @@ pub fn run_first(cmds: &[Vec<String>]) -> Result<(), String> {
 
 pub fn spawn(prog: &str, args: &[String]) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
+    // Tests drive the real interface on real games: nothing may start.
+    if std::env::var_os("LENTA_DRY_RUN").is_some() {
+        eprintln!("lenta: dry run, not starting {prog} {args:?}");
+        return Ok(());
+    }
     let mut cmd = Command::new(prog);
     cmd.args(args)
         .stdin(Stdio::null())

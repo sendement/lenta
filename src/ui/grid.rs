@@ -109,35 +109,78 @@ pub fn scroll(ui: &Ui, g: &mut Grid, lay: &Layout, view: Rect, n: usize, ease: f
 }
 
 /// Filter chips in a row; returns the one clicked.
+/// Filter chips in a row up to `right`; when they don't fit, the row
+/// slides so the current one shows. Returns the one clicked.
 pub fn chips(
     ui: &mut Ui,
     at: egui::Pos2,
+    right: f32,
     labels: &[String],
     current: usize,
-    accent: Color32,
+    colors: &dyn Fn(usize) -> (Color32, Color32),
 ) -> Option<usize> {
-    let p = ui.painter().clone();
-    let mut x = at.x;
+    let font = FontId::proportional(16.0);
+    let p0 = ui.painter().clone();
+    let sizes: Vec<egui::Vec2> = labels
+        .iter()
+        .map(|l| {
+            p0.layout_no_wrap(l.clone(), font.clone(), Color32::WHITE)
+                .size()
+                + vec2(28.0, 14.0)
+        })
+        .collect();
+    // Where the current chip ends, and how far to slide for it.
+    let end: f32 = sizes
+        .iter()
+        .take(current + 1)
+        .map(|s| s.x + 10.0)
+        .sum::<f32>();
+    let room = right - at.x;
+    let shift = if end > room - 60.0 {
+        end - room + 60.0 + sizes.get(current + 1).map_or(0.0, |s| s.x.min(80.0))
+    } else {
+        0.0
+    };
+    let id = ui.id().with("chips_shift");
+    let shift = ui.ctx().animate_value_with_time(id, shift, 0.18);
+    let clip = egui::Rect::from_min_max(pos2(at.x - 6.0, at.y - 4.0), pos2(right, at.y + 60.0));
+    let p = ui.painter_at(clip);
+    let mut x = at.x - shift;
     let mut clicked = None;
     for (i, l) in labels.iter().enumerate() {
-        let font = FontId::proportional(16.0);
-        let galley = p.layout_no_wrap(l.clone(), font.clone(), Color32::WHITE);
-        let r = egui::Rect::from_min_size(pos2(x, at.y), galley.size() + vec2(28.0, 14.0));
-        let resp = ui.interact(r, ui.id().with(("chip", i, l)), Sense::click());
+        let r = egui::Rect::from_min_size(pos2(x, at.y), sizes[i]);
+        x = r.right() + 10.0;
+        if r.right() < clip.left() || r.left() > clip.right() {
+            continue;
+        }
+        let resp = ui.interact(
+            r.intersect(clip),
+            ui.id().with(("chip", i, l)),
+            Sense::click(),
+        );
         let on = i == current;
-        let fill = if on {
-            accent.gamma_multiply(0.85)
-        } else if resp.hovered() {
-            Color32::from_white_alpha(30)
+        if on {
+            let (c1, c2) = colors(i);
+            super::widgets::gradient_pill(
+                &p,
+                r,
+                r.height() / 2.0,
+                c1.gamma_multiply(0.9),
+                c2.gamma_multiply(0.9),
+            );
         } else {
-            Color32::from_white_alpha(16)
-        };
-        p.rect_filled(r, r.height() / 2.0, fill);
+            let fill = if resp.hovered() {
+                Color32::from_white_alpha(30)
+            } else {
+                Color32::from_white_alpha(16)
+            };
+            p.rect_filled(r, r.height() / 2.0, fill);
+        }
         p.text(
             r.center(),
             Align2::CENTER_CENTER,
             l,
-            font,
+            font.clone(),
             if on {
                 Color32::WHITE
             } else {
@@ -147,7 +190,6 @@ pub fn chips(
         if resp.clicked() {
             clicked = Some(i);
         }
-        x = r.right() + 10.0;
     }
     clicked
 }

@@ -1957,6 +1957,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 name = "lenta"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "crossbeam-channel",
  "dirs 7.0.0",
  "eframe",
@@ -1968,6 +1969,7 @@ dependencies = [
  "gilrs",
  "image",
  "libc",
+ "qrcode",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2977,6 +2979,12 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"

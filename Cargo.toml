@@ -21,6 +21,8 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 freedesktop-desktop-entry = "0.8"
 freedesktop-icons = "0.4"
 libc = "0.2"
+base64 = "0.22"
+qrcode = { version = "0.14", default-features = false }
 
 [profile.release]
 lto = "thin"

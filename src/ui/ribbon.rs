@@ -25,19 +25,34 @@ pub fn arts(g: &Game, shape: Shape) -> [Option<&Art>; 4] {
             a.portrait.as_ref(),
             a.portrait_alt.as_ref(),
             a.landscape.as_ref(),
-            a.hero.as_ref(),
+            a.landscape_alt.as_ref(),
         ],
         Shape::Landscape => [
             a.landscape.as_ref(),
+            a.landscape_alt.as_ref(),
             a.hero.as_ref(),
             a.portrait.as_ref(),
-            a.portrait_alt.as_ref(),
         ],
     }
 }
 
-/// Pixels to decode card art at.
-pub const CARD_PX: u32 = 640;
+/// Pixels to decode card art at: set each frame from the biggest card's
+/// size on screen.
+static CARD_PX: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(768);
+
+/// How card art is decoded now.
+pub fn card_kind() -> Kind {
+    Kind::Card(CARD_PX.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The selected card's longer side in real pixels, in steps (so moving a
+/// slider doesn't decode everything again on every notch).
+pub fn size_cards(cfg: &Config, pixels_per_point: f32) {
+    let s = base_size(cfg);
+    let px = s.x.max(s.y) * cfg.selected_scale.max(1.0) * pixels_per_point;
+    let step = (px / 256.0).ceil().clamp(2.0, 8.0) as u32 * 256;
+    CARD_PX.store(step, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// A colour pair of its own for a game without art.
 pub fn own_colors(title: &str) -> (Color32, Color32) {
@@ -51,7 +66,7 @@ pub fn own_colors(title: &str) -> (Color32, Color32) {
 /// A card's face: its art (covering the card), or a gradient with the
 /// title written on it.
 pub fn fill_for(images: &mut Images, g: &Game, shape: Shape, size: Vec2) -> (Fill, bool) {
-    match images.first(&arts(g, shape), Kind::Fit(CARD_PX)) {
+    match images.first(&arts(g, shape), card_kind()) {
         Some(t) => (
             Fill::Image(t.handle.id(), card::cover_uv(t.size, size)),
             true,

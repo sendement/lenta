@@ -81,6 +81,9 @@ pub struct Config {
     pub steam: bool,
     pub heroic: bool,
     pub lutris: bool,
+    /// With a Steam account: the owned games that aren't installed, in
+    /// the library.
+    pub show_uninstalled: bool,
 }
 
 impl Default for Config {
@@ -114,6 +117,7 @@ impl Default for Config {
             steam: true,
             heroic: true,
             lutris: true,
+            show_uninstalled: true,
         }
     }
 }

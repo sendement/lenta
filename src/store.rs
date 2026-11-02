@@ -8,8 +8,9 @@ use std::time::Duration;
 use crossbeam_channel::{Receiver, Sender};
 use serde_json::Value;
 
-use crate::game::Art;
+use crate::game::{Art, Game};
 use crate::sources::steam::{self, Achievement};
+use crate::sources::{emu, web};
 
 #[derive(Clone, Debug, Default)]
 pub struct Details {
@@ -32,7 +33,7 @@ pub enum State<T> {
 
 enum Msg {
     Details(u32, Option<Details>),
-    Ach(u32, Option<Vec<Achievement>>),
+    Ach(String, Option<Vec<Achievement>>),
 }
 
 pub struct Store {
@@ -40,7 +41,8 @@ pub struct Store {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     details: HashMap<u32, State<Details>>,
-    ach: HashMap<u32, State<Vec<Achievement>>>,
+    /// By game key: the same store id may be two games with two saves.
+    ach: HashMap<String, State<Vec<Achievement>>>,
 }
 
 const FRESH: Duration = Duration::from_secs(7 * 86400);
@@ -82,14 +84,43 @@ impl Store {
         })
     }
 
-    pub fn achievements(&mut self, appid: u32) -> &State<Vec<Achievement>> {
+    /// A game's achievements: Steam's own record for a Steam game, an
+    /// emulator's save matched to the store's list for one from elsewhere.
+    pub fn achievements(&mut self, g: &Game) -> &State<Vec<Achievement>> {
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
-        self.ach.entry(appid).or_insert_with(|| {
+        let (key, steam_id, emu) = (g.key.clone(), g.steam_appid, g.emu.clone());
+        self.ach.entry(g.key.clone()).or_insert_with(|| {
             std::thread::spawn(move || {
-                let _ = tx.send(Msg::Ach(
-                    appid,
-                    steam::achievements(appid, crate::i18n::steam_lang()),
-                ));
+                let lang = crate::i18n::steam_lang();
+                let list = match (steam_id, emu) {
+                    (Some(id), _) => steam::achievements(id, lang).map(|mut l| {
+                        // How rare each is, when the store answers.
+                        if let Some(all) = web::achievement_list(id, lang) {
+                            let pct: HashMap<&str, f32> = all
+                                .iter()
+                                .filter_map(|a| Some((a.id.as_str(), a.percent?)))
+                                .collect();
+                            for a in &mut l {
+                                a.percent = pct.get(a.id.as_str()).copied();
+                            }
+                        }
+                        l
+                    }),
+                    (None, Some(save)) => web::achievement_list(save.appid, lang).map(|mut l| {
+                        let got = emu::unlocked(&save.file);
+                        let lower: HashMap<String, u64> =
+                            got.iter().map(|(k, v)| (k.to_lowercase(), *v)).collect();
+                        for a in &mut l {
+                            a.unlocked = got
+                                .get(&a.id)
+                                .or_else(|| lower.get(&a.id.to_lowercase()))
+                                .copied();
+                        }
+                        l
+                    }),
+                    (None, None) => None,
+                };
+                let _ = tx.send(Msg::Ach(key, list));
                 ctx.request_repaint();
             });
             State::Loading

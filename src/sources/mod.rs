@@ -1,9 +1,12 @@
 //! Where games come from.
 
 pub mod desktop;
+pub mod emu;
 pub mod heroic;
 pub mod lutris;
 pub mod steam;
+pub mod steamplay;
+pub mod web;
 
 use crate::config::{Config, Sort};
 use crate::game::Game;
@@ -17,6 +20,13 @@ pub fn scan(cfg: &Config) -> Vec<Game> {
     let mut out = Vec::new();
     for t in [s, h, l] {
         out.extend(t.join().unwrap_or_default());
+    }
+    // Games from elsewhere: a Steam emulator's files name the store id
+    // and keep the achievements.
+    for g in out.iter_mut().filter(|g| g.steam_appid.is_none()) {
+        let (id, save) = emu::resolve(g.prefix.as_deref(), g.install_dir.as_deref());
+        g.store_appid = id;
+        g.emu = save;
     }
     out
 }

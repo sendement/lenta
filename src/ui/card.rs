@@ -208,8 +208,8 @@ fn rings(
     let mut mesh = Mesh::default();
     for &(out, alpha) in rings {
         for (p, nrm) in &outline {
-            let t = ((p.x / pose.size.x + 0.5) * 0.5 + (p.y / pose.size.y + 0.5) * 0.5)
-                .clamp(0.0, 1.0);
+            let t =
+                ((p.x / pose.size.x + 0.5) * 0.5 + (p.y / pose.size.y + 0.5) * 0.5).clamp(0.0, 1.0);
             mesh.colored_vertex(
                 pose.project(*p + *nrm * out) + shift,
                 color(t).gamma_multiply(alpha),

@@ -15,6 +15,10 @@ use crate::game::Art;
 pub enum Kind {
     /// Longest side at most this many pixels.
     Fit(u32),
+    /// Card art: longest side this many pixels, scaled up too (up to
+    /// twice, with a bicubic filter: smoother than the GPU stretching a
+    /// small picture).
+    Card(u32),
     /// Small and blurred, for backgrounds.
     Blur,
 }
@@ -182,6 +186,17 @@ fn load(key: &Key) -> Option<(ColorImage, Color32, Color32)> {
         Kind::Fit(max) => {
             if img.width().max(img.height()) > max {
                 img.resize(max, max, image::imageops::FilterType::Triangle)
+            } else {
+                img
+            }
+        }
+        Kind::Card(px) => {
+            let long = img.width().max(img.height()).max(1);
+            let target = px.min(long * 2);
+            if target > long {
+                img.resize(target, target, image::imageops::FilterType::CatmullRom)
+            } else if target < long {
+                img.resize(target, target, image::imageops::FilterType::Triangle)
             } else {
                 img
             }

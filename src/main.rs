@@ -1,5 +1,6 @@
 //! lenta: a gamepad-first game launcher.
 
+mod account;
 mod app;
 mod config;
 mod fonts;
@@ -17,11 +18,33 @@ mod vdf;
 mod shots;
 
 fn main() -> eframe::Result {
+    // For development: one app's appinfo record.
+    if std::env::args().nth(1).as_deref() == Some("--appinfo")
+        && let Some(id) = std::env::args().nth(2).and_then(|a| a.parse().ok())
+    {
+        for root in sources::steam::roots() {
+            let all = sources::steam::appinfo(&root, &[id].into_iter().collect());
+            println!("{:#?}", all.get(&id));
+        }
+        return Ok(());
+    }
+    // For development: why the account's game list does or doesn't load.
+    if std::env::args().nth(1).as_deref() == Some("--owned") {
+        match account::Account::load() {
+            None => println!("not signed in (or the token expired)"),
+            Some(a) => match account::fetch_owned(&a) {
+                Ok(b) => println!("ok, {} bytes", b.len()),
+                Err(e) => println!("{e}"),
+            },
+        }
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("--list") {
         // What was found, for checking the sources without the window.
         let cfg = config::Config::load();
         i18n::set(cfg.lang);
         let mut games = sources::scan(&cfg);
+        sources::web::enrich(&mut games);
         sources::sort(&mut games, cfg.sort);
         for g in &games {
             println!(
@@ -36,9 +59,44 @@ fn main() -> eframe::Result {
                     None => "-".into(),
                 }
             );
+            if g.steam_appid.is_none() {
+                println!(
+                    "         store id {:?}, prefix {:?}, emulator save {:?}",
+                    g.store_appid,
+                    g.prefix,
+                    g.emu.as_ref().map(|e| &e.file)
+                );
+            }
         }
         let apps = sources::desktop::apps();
         println!("{} games, {} system apps", games.len(), apps.len());
+        let cols = sources::steamplay::collections();
+        println!(
+            "collections: {}",
+            cols.iter()
+                .map(|c| format!("{} ({})", c.name, c.apps.len()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let tools = sources::steamplay::tools();
+        println!(
+            "tools: {}",
+            tools
+                .iter()
+                .map(|t| t.display.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let map = sources::steamplay::mapping();
+        println!(
+            "tool per game: {} set, default {:?}",
+            map.len(),
+            map.get(&0)
+        );
+        println!(
+            "steam account: {}",
+            account::Account::load().map_or("-".into(), |a| a.name)
+        );
         return Ok(());
     }
     let cfg = config::Config::load();

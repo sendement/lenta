@@ -98,6 +98,17 @@ pub fn users(root: &Path) -> Vec<(u32, PathBuf)> {
 
 /// What appinfo.vdf says of these apps: their type ("game", "tool"…).
 fn app_types(root: &Path, wanted: &HashSet<u32>) -> HashMap<u32, String> {
+    appinfo(root, wanted)
+        .into_iter()
+        .filter_map(|(id, kv)| {
+            let t = kv.path(&["appinfo", "common", "type"]).and_then(Kv::str)?;
+            Some((id, t.to_lowercase()))
+        })
+        .collect()
+}
+
+/// The appinfo.vdf records of the `wanted` apps (all of them when empty).
+pub fn appinfo(root: &Path, wanted: &HashSet<u32>) -> HashMap<u32, Kv> {
     let mut out = HashMap::new();
     let Ok(b) = std::fs::read(root.join("appcache/appinfo.vdf")) else {
         return out;
@@ -134,7 +145,7 @@ fn app_types(root: &Path, wanted: &HashSet<u32>) -> HashMap<u32, String> {
         }
         let Some(size) = r.u32() else { break };
         let end = r.at + size as usize;
-        if wanted.contains(&appid) {
+        if wanted.is_empty() || wanted.contains(&appid) {
             // State, update time, token, sha1, change number, binary sha1.
             let header = 4 + 4 + 8 + 20 + 4 + 20;
             let mut kv = vdf::Reader {
@@ -142,10 +153,7 @@ fn app_types(root: &Path, wanted: &HashSet<u32>) -> HashMap<u32, String> {
                 at: r.at + header,
             };
             if let Some(m) = kv.map(v29.then_some(table.as_slice())) {
-                let kv = Kv::Map(m);
-                if let Some(t) = kv.path(&["appinfo", "common", "type"]).and_then(Kv::str) {
-                    out.insert(appid, t.to_lowercase());
-                }
+                out.insert(appid, Kv::Map(m));
             }
         }
         r.at = end;
@@ -250,6 +258,7 @@ fn steam_art(root: &Path, users: &[(u32, PathBuf)], appid: u32) -> Arts {
     // the store's CDN, the small one stays as the fallback.
     let small_portrait = local(&["library_capsule.jpg"]).map(Art::File);
     Arts {
+        landscape_alt: None,
         portrait_alt: if custom_portrait.is_none() && big_portrait.is_none() {
             small_portrait
         } else {
@@ -367,12 +376,66 @@ pub fn games() -> Vec<Game> {
                 playtime_min: (play > 0).then_some(play),
                 last_played: (last > 0).then_some(last),
                 steam_appid: Some(appid),
+                store_appid: None,
+                installed: true,
+                compat_id: Some(appid),
+                emu: None,
+                prefix: None,
                 install_dir: dir,
                 launch: steam_cmd(&root, format!("steam://rungameid/{appid}")),
             });
         }
         out.extend(shortcuts(&root, &users));
     }
+    out
+}
+
+/// Owned games that aren't installed (from the account's list): Play
+/// asks Steam to install them.
+pub fn uninstalled(owned: &[crate::account::Owned]) -> Vec<Game> {
+    let Some(root) = roots().into_iter().next() else {
+        return Vec::new();
+    };
+    let users = users(&root);
+    owned
+        .iter()
+        .map(|o| Game {
+            key: format!("steam:{}", o.appid),
+            title: o.name.clone(),
+            source: Source::Steam,
+            sub: o.family.then(|| crate::i18n::tr("family").to_string()),
+            art: steam_art(&root, &users, o.appid),
+            playtime_min: (o.playtime_min > 0).then_some(o.playtime_min),
+            last_played: (o.last_played > 0).then_some(o.last_played),
+            steam_appid: Some(o.appid),
+            store_appid: None,
+            installed: false,
+            compat_id: Some(o.appid),
+            emu: None,
+            prefix: None,
+            install_dir: None,
+            launch: steam_cmd(&root, format!("steam://install/{}", o.appid)),
+        })
+        .collect()
+}
+
+/// The command that runs Steam itself with these arguments ("-shutdown").
+pub fn steam_run(args: &[&str]) -> Vec<Vec<String>> {
+    let Some(root) = roots().into_iter().next() else {
+        return Vec::new();
+    };
+    let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+    let mut out = Vec::new();
+    if flatpak_root(&root) {
+        let mut v: Vec<String> = ["flatpak", "run", "com.valvesoftware.Steam"]
+            .map(String::from)
+            .to_vec();
+        v.extend(args.clone());
+        out.push(v);
+    }
+    let mut v = vec!["steam".to_string()];
+    v.extend(args);
+    out.push(v);
     out
 }
 
@@ -414,6 +477,7 @@ fn shortcuts(root: &Path, users: &[(u32, PathBuf)]) -> Vec<Game> {
                 source: Source::Steam,
                 sub: Some("Non-Steam".into()),
                 art: Arts {
+                    landscape_alt: None,
                     portrait_alt: None,
                     portrait: file(format!("{id}p")),
                     landscape: file(id.to_string()),
@@ -424,6 +488,13 @@ fn shortcuts(root: &Path, users: &[(u32, PathBuf)]) -> Vec<Game> {
                 playtime_min: None,
                 last_played: (last > 0).then_some(last),
                 steam_appid: None,
+                store_appid: None,
+                installed: true,
+                compat_id: Some(id),
+                emu: None,
+                // Proton keeps a shortcut's prefix under its short id.
+                prefix: Some(root.join(format!("steamapps/compatdata/{id}/pfx")))
+                    .filter(|p| p.is_dir()),
                 install_dir: s
                     .get_str("StartDir")
                     .map(|d| PathBuf::from(d.trim_matches('"'))),
@@ -438,6 +509,8 @@ fn shortcuts(root: &Path, users: &[(u32, PathBuf)]) -> Vec<Game> {
 
 #[derive(Clone, Debug)]
 pub struct Achievement {
+    /// The API name ("ACH_WIN"), which emulators' saves use.
+    pub id: String,
     pub name: String,
     pub desc: String,
     pub icon: Option<Art>,
@@ -445,6 +518,8 @@ pub struct Achievement {
     pub hidden: bool,
     /// Unlocked, and when (0 when Steam kept no time).
     pub unlocked: Option<u64>,
+    /// Share of Steam players who have it.
+    pub percent: Option<f32>,
 }
 
 fn localized(kv: Option<&Kv>, lang: &str) -> String {
@@ -496,6 +571,8 @@ pub fn achievements(appid: u32, lang: &str) -> Option<Vec<Achievement>> {
                 };
                 let got = bit < 32 && data & (1 << bit) != 0;
                 out.push(Achievement {
+                    id: a.get_str("name").unwrap_or_default().to_string(),
+                    percent: None,
                     name: localized(d.and_then(|d| d.get("name")), lang),
                     desc: localized(d.and_then(|d| d.get("desc")), lang),
                     icon: icon("icon"),

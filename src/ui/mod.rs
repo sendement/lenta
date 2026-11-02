@@ -7,5 +7,6 @@ pub mod library;
 pub mod ribbon;
 pub mod settings;
 pub mod sidebar;
+pub mod steam;
 pub mod system;
 pub mod widgets;

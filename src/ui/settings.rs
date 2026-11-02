@@ -43,6 +43,8 @@ pub enum S {
     Heroic,
     Lutris,
     Rescan,
+    Account,
+    Uninstalled,
 }
 
 enum Row {
@@ -86,6 +88,9 @@ const ROWS: &[Row] = &[
     Row::Item(S::Heroic),
     Row::Item(S::Lutris),
     Row::Item(S::Rescan),
+    Row::Head("s_account"),
+    Row::Item(S::Account),
+    Row::Item(S::Uninstalled),
 ];
 
 fn items() -> Vec<S> {
@@ -122,9 +127,10 @@ fn kind(s: S) -> Kind {
         | S::BgTint
         | S::Steam
         | S::Heroic
-        | S::Lutris => Kind::Toggle,
+        | S::Lutris
+        | S::Uninstalled => Kind::Toggle,
         S::Color1 | S::Color2 => Kind::Color,
-        S::Rescan => Kind::Button,
+        S::Rescan | S::Account => Kind::Button,
         _ => Kind::Choice,
     }
 }
@@ -160,6 +166,8 @@ fn label(s: S) -> &'static str {
         S::Heroic => "src_heroic",
         S::Lutris => "src_lutris",
         S::Rescan => "rescan",
+        S::Account => "account",
+        S::Uninstalled => "show_uninstalled",
     })
 }
 
@@ -189,6 +197,7 @@ fn toggle_ref(c: &mut Config, s: S) -> Option<&mut bool> {
         S::Steam => &mut c.steam,
         S::Heroic => &mut c.heroic,
         S::Lutris => &mut c.lutris,
+        S::Uninstalled => &mut c.show_uninstalled,
         _ => return None,
     })
 }
@@ -331,6 +340,7 @@ fn relevant(c: &Config, s: S) -> bool {
         S::Reflection => c.orientation == Orientation::Horizontal,
         S::TiltMode => c.tilt > 0.0,
         S::BgDim => c.bg_hero,
+        S::Account | S::Uninstalled => c.steam,
         _ => true,
     }
 }
@@ -387,11 +397,12 @@ impl App {
                     self.set.color_edit = Some(0);
                 }
             }
-            Kind::Button => {
-                if s == S::Rescan {
-                    self.rescan();
-                }
-            }
+            Kind::Button => match s {
+                S::Rescan => self.rescan(),
+                S::Account if self.steam.account.is_some() => self.sign_out(),
+                S::Account => self.start_login(),
+                _ => {}
+            },
             Kind::Slider { .. } => {}
         }
     }
@@ -740,6 +751,26 @@ impl App {
                 }
             }
             Kind::Button => {
+                let text = match s {
+                    S::Account => match &self.steam.account {
+                        Some(_) => tr("sign_out").to_string(),
+                        None => tr("sign_in").to_string(),
+                    },
+                    _ if self.scanning => "…".to_string(),
+                    _ => "↻".to_string(),
+                };
+                // Who is signed in, beside the button.
+                if s == S::Account
+                    && let Some(a) = &self.steam.account
+                {
+                    p.text(
+                        pos2(vr.right() - 156.0, vr.center().y),
+                        Align2::RIGHT_CENTER,
+                        &a.name,
+                        font.clone(),
+                        tc,
+                    );
+                }
                 let r = Rect::from_min_max(
                     pos2(vr.right() - 140.0, vr.top() + 8.0),
                     pos2(vr.right(), vr.bottom() - 8.0),
@@ -756,8 +787,8 @@ impl App {
                 p.text(
                     r.center(),
                     Align2::CENTER_CENTER,
-                    if self.scanning { "…" } else { "↻" },
-                    FontId::proportional(20.0),
+                    text,
+                    FontId::proportional(if s == S::Account { 16.0 } else { 20.0 }),
                     Color32::WHITE,
                 );
             }

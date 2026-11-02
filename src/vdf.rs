@@ -57,6 +57,77 @@ impl Kv {
     pub fn get_int(&self, key: &str) -> Option<i64> {
         self.get(key).and_then(Kv::int)
     }
+
+    /// The child map under `key`, made (empty) when missing. None if this
+    /// isn't a map or the child isn't one.
+    pub fn map_mut(&mut self, key: &str) -> Option<&mut Kv> {
+        let Kv::Map(m) = self else { return None };
+        let i = match m.iter().position(|(k, _)| k.eq_ignore_ascii_case(key)) {
+            Some(i) => i,
+            None => {
+                m.push((key.to_string(), Kv::Map(Vec::new())));
+                m.len() - 1
+            }
+        };
+        let v = &mut m[i].1;
+        matches!(v, Kv::Map(_)).then_some(v)
+    }
+
+    pub fn path_mut(&mut self, keys: &[&str]) -> Option<&mut Kv> {
+        keys.iter().try_fold(self, |n, k| n.map_mut(k))
+    }
+
+    /// Set `key` to `v`, in place if it's there.
+    pub fn set(&mut self, key: &str, v: Kv) {
+        if let Kv::Map(m) = self {
+            match m.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(key)) {
+                Some(e) => e.1 = v,
+                None => m.push((key.to_string(), v)),
+            }
+        }
+    }
+
+    pub fn remove(&mut self, key: &str) {
+        if let Kv::Map(m) = self {
+            m.retain(|(k, _)| !k.eq_ignore_ascii_case(key));
+        }
+    }
+
+    /// Back to the text form, laid out as Steam writes it.
+    pub fn to_text(&self) -> String {
+        fn quote(s: &str) -> String {
+            let mut o = String::with_capacity(s.len() + 2);
+            o.push('"');
+            for c in s.chars() {
+                match c {
+                    '"' => o.push_str("\\\""),
+                    '\\' => o.push_str("\\\\"),
+                    // Steam keeps line breaks and tabs as they are.
+                    c => o.push(c),
+                }
+            }
+            o.push('"');
+            o
+        }
+        fn write(out: &mut String, m: &[(String, Kv)], depth: usize) {
+            let tabs = "\t".repeat(depth);
+            for (k, v) in m {
+                match v {
+                    Kv::Map(c) => {
+                        out.push_str(&format!("{tabs}{}\n{tabs}{{\n", quote(k)));
+                        write(out, c, depth + 1);
+                        out.push_str(&format!("{tabs}}}\n"));
+                    }
+                    Kv::Str(s) => out.push_str(&format!("{tabs}{}\t\t{}\n", quote(k), quote(s))),
+                    Kv::Int(i) => out.push_str(&format!("{tabs}{}\t\t\"{i}\"\n", quote(k))),
+                    Kv::Float(f) => out.push_str(&format!("{tabs}{}\t\t\"{f}\"\n", quote(k))),
+                }
+            }
+        }
+        let mut out = String::new();
+        write(&mut out, self.entries(), 0);
+        out
+    }
 }
 
 // ------------------------------------------------------------------ text
@@ -265,6 +336,57 @@ mod tests {
             kv.path(&["UserLocalConfigStore", "path"]).and_then(Kv::str),
             Some("C:\\Games")
         );
+    }
+
+    #[test]
+    fn text_round_trip() {
+        let src = "\"InstallConfigStore\"\n{\n\t\"a\"\t\t\"C:\\\\x \\\"q\\\"\"\n\t\"m\"\n\t{\n\t\t\"k\"\t\t\"v\"\n\t}\n}\n";
+        let kv = parse_text(src);
+        assert_eq!(kv.to_text(), src);
+        assert_eq!(parse_text(&kv.to_text()), kv);
+    }
+
+    #[test]
+    fn edit() {
+        let mut kv = parse_text("\"r\" { \"x\" \"1\" }");
+        let m = kv.path_mut(&["r", "CompatToolMapping", "570"]).unwrap();
+        m.set("name", Kv::Str("proton_9".into()));
+        assert_eq!(
+            kv.path(&["r", "compattoolmapping", "570", "name"])
+                .and_then(Kv::str),
+            Some("proton_9")
+        );
+        kv.path_mut(&["r", "CompatToolMapping"])
+            .unwrap()
+            .remove("570");
+        assert!(kv.path(&["r", "CompatToolMapping", "570"]).is_none());
+    }
+
+    /// Steam's own config.vdf comes back byte for byte (read only):
+    /// `cargo test real_config -- --ignored`.
+    #[test]
+    #[ignore]
+    fn real_config_round_trip() {
+        for root in crate::sources::steam::roots() {
+            let f = root.join("config/config.vdf");
+            let Ok(src) = std::fs::read_to_string(&f) else {
+                continue;
+            };
+            let out = parse_text(&src).to_text();
+            if out != src {
+                let at = out
+                    .bytes()
+                    .zip(src.bytes())
+                    .position(|(a, b)| a != b)
+                    .unwrap_or(0);
+                panic!(
+                    "{}: differs at {at}: {:?} vs {:?}",
+                    f.display(),
+                    &out[at.saturating_sub(40)..(at + 40).min(out.len())],
+                    &src[at.saturating_sub(40)..(at + 40).min(src.len())]
+                );
+            }
+        }
     }
 
     #[test]

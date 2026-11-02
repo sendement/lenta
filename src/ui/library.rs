@@ -5,39 +5,111 @@ use egui::{Align2, Color32, FontId, Rect, Sense, Ui, pos2, vec2};
 use super::card::{self, Pose};
 use super::grid::{self, Layout};
 use super::ribbon;
+use super::widgets;
 use crate::app::App;
 use crate::config::Shape;
 use crate::game::{Game, Source};
 use crate::i18n::tr;
 use crate::input::Action;
 
+/// What the library shows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LibFilter {
+    All,
+    Source(Source),
+    /// Owned on Steam, not installed (after signing in).
+    NotInstalled,
+    /// One of Steam's collections (index into `steam.collections`).
+    Collection(usize),
+}
+
 impl App {
-    /// The sources that have games: the filters after "All".
-    fn lib_filters(&self) -> Vec<Source> {
-        Source::ALL
-            .into_iter()
-            .filter(|s| self.games.iter().any(|g| g.source == *s))
-            .collect()
+    /// Installed games (the hidden ones aside) and, if wanted, the
+    /// account's others.
+    fn lib_main(&self) -> impl Iterator<Item = &Game> {
+        let more = self
+            .steam
+            .more
+            .iter()
+            .filter(|g| !g.installed && self.cfg.show_uninstalled);
+        self.games.iter().chain(more)
     }
 
-    fn lib_games(&self) -> Vec<&Game> {
-        let f = self.lib_filters();
-        let pick = self
-            .lib
-            .filter
-            .checked_sub(1)
-            .and_then(|i| f.get(i).copied());
-        let mut v: Vec<&Game> = self
-            .games
-            .iter()
-            .filter(|g| pick.is_none_or(|s| g.source == s))
-            .collect();
-        v.sort_by_key(|g| g.title.to_lowercase());
+    /// The filters with something in them: All, the sources, Not
+    /// installed, then the collections.
+    pub(crate) fn lib_filters(&self) -> Vec<LibFilter> {
+        let mut v = vec![LibFilter::All];
+        v.extend(
+            Source::ALL
+                .into_iter()
+                .filter(|s| self.lib_main().any(|g| g.source == *s))
+                .map(LibFilter::Source),
+        );
+        if self.cfg.show_uninstalled && self.steam.more.iter().any(|g| !g.installed) {
+            v.push(LibFilter::NotInstalled);
+        }
+        for i in 0..self.steam.collections.len() {
+            if self.collection_games(i).next().is_some() {
+                v.push(LibFilter::Collection(i));
+            }
+        }
         v
     }
 
+    fn collection_games(&self, i: usize) -> impl Iterator<Item = &Game> {
+        let ids: std::collections::HashSet<u32> = self
+            .steam
+            .collections
+            .get(i)
+            .map(|c| c.apps.iter().copied().collect())
+            .unwrap_or_default();
+        self.games
+            .iter()
+            .chain(&self.steam.more)
+            .filter(move |g| g.steam_appid.is_some_and(|id| ids.contains(&id)))
+            .filter(|g| g.installed || self.cfg.show_uninstalled)
+    }
+
+    pub(crate) fn lib_filter(&self) -> LibFilter {
+        self.lib_filters()
+            .get(self.lib.filter)
+            .copied()
+            .unwrap_or(LibFilter::All)
+    }
+
+    fn lib_games(&self) -> Vec<&Game> {
+        let mut v: Vec<&Game> = match self.lib_filter() {
+            LibFilter::All => self.lib_main().collect(),
+            LibFilter::Source(s) => self.lib_main().filter(|g| g.source == s).collect(),
+            LibFilter::NotInstalled => self.steam.more.iter().filter(|g| !g.installed).collect(),
+            LibFilter::Collection(i) => self.collection_games(i).collect(),
+        };
+        // Installed first, then by name.
+        v.sort_by_key(|g| (!g.installed, g.title.to_lowercase()));
+        v
+    }
+
+    fn filter_label(&self, f: LibFilter) -> String {
+        let (name, n) = match f {
+            LibFilter::All => (tr("all").to_string(), self.lib_main().count()),
+            LibFilter::Source(s) => (
+                s.name().to_string(),
+                self.lib_main().filter(|g| g.source == s).count(),
+            ),
+            LibFilter::NotInstalled => (
+                tr("not_installed").to_string(),
+                self.steam.more.iter().filter(|g| !g.installed).count(),
+            ),
+            LibFilter::Collection(i) => (
+                self.steam.collections[i].name.clone(),
+                self.collection_games(i).count(),
+            ),
+        };
+        format!("{name} · {n}")
+    }
+
     pub fn library_input(&mut self, a: Action) -> bool {
-        let nf = self.lib_filters().len() + 1;
+        let nf = self.lib_filters().len();
         match a {
             Action::LeftTrigger | Action::RightTrigger => {
                 let d = if a == Action::RightTrigger { 1 } else { nf - 1 };
@@ -74,22 +146,20 @@ impl App {
             FontId::proportional(32.0),
             Color32::WHITE,
         );
-        let mut labels = vec![tr("all").to_string()];
         let filters = self.lib_filters();
-        for s in &filters {
-            labels.push(format!(
-                "{} · {}",
-                s.name(),
-                self.games.iter().filter(|g| g.source == *s).count()
-            ));
-        }
-        labels[0] = format!("{} · {}", tr("all"), self.games.len());
+        self.lib.filter = self.lib.filter.min(filters.len().saturating_sub(1));
+        let labels: Vec<String> = filters.iter().map(|f| self.filter_label(*f)).collect();
         if let Some(i) = grid::chips(
             ui,
             pos2(rect.left(), rect.top() + 66.0),
+            rect.right(),
             &labels,
             self.lib.filter,
-            self.accent.0,
+            &|i| match filters.get(i) {
+                Some(LibFilter::Source(s)) => widgets::source_colors(*s),
+                Some(LibFilter::Collection(_)) => widgets::source_colors(Source::Steam),
+                _ => self.accent,
+            },
         ) {
             self.lib.filter = i;
             self.lib.sel = 0;
@@ -144,12 +214,31 @@ impl App {
             if selected {
                 card::glow(&p, &pose, c1, c2, self.cfg.glow * 0.7, 0.75 + 0.25 * pulse);
             }
-            let tint = if selected || self.cfg.dim == 0.0 {
-                Color32::WHITE
+            let mut light = if selected || self.cfg.dim == 0.0 {
+                1.0
             } else {
-                Color32::from_gray(((1.0 - self.cfg.dim * 0.5) * 255.0) as u8)
+                1.0 - self.cfg.dim * 0.5
             };
+            // Not installed: faded, with a mark.
+            if !g.installed {
+                light *= 0.55;
+            }
+            let tint = Color32::from_gray((light * 255.0) as u8);
             card::draw(&p, &pose, &fill, tint, None);
+            if !g.installed {
+                let b = pose.bounds();
+                let mark = p.layout_no_wrap(
+                    tr("not_installed_one").to_string(),
+                    FontId::proportional(12.0),
+                    Color32::WHITE,
+                );
+                let r = Rect::from_min_size(
+                    pos2(b.left() + 8.0, b.bottom() - 8.0 - mark.size().y - 8.0),
+                    mark.size() + vec2(16.0, 8.0),
+                );
+                p.rect_filled(r, r.height() / 2.0, Color32::from_black_alpha(170));
+                p.galley(r.min + vec2(8.0, 4.0), mark, Color32::WHITE);
+            }
             if !has_art {
                 ribbon::title_on(&p, &mut self.images, g, pose.bounds(), 1.0);
             }

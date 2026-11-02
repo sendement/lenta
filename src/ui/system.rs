@@ -101,9 +101,10 @@ impl App {
         if let Some(i) = grid::chips(
             ui,
             pos2(rect.left(), rect.top() + 66.0),
+            rect.right(),
             &labels,
             self.sys.filter,
-            self.accent.0,
+            &|_| self.accent,
         ) {
             self.sys.filter = i;
             self.sys.sel = 0;
