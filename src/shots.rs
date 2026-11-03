@@ -57,6 +57,38 @@ fn shots() {
         }
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
+    // Held and dragged to the left by the mouse: later cards come in.
+    {
+        use egui::{Event, PointerButton, pos2};
+        let before = h.state().home.sel;
+        let n = h.state().games.len();
+        let press = |h: &mut Harness<'static, App>, at, pressed| {
+            h.input_mut().events.push(Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            });
+            h.step();
+        };
+        let start = pos2(1300.0, 330.0);
+        h.input_mut().events.push(Event::PointerMoved(start));
+        h.step();
+        press(&mut h, start, true);
+        for i in 1..=20 {
+            h.input_mut().events.push(Event::PointerMoved(
+                start - egui::vec2(i as f32 * 30.0, 0.0),
+            ));
+            h.step();
+        }
+        assert!(h.state().home.dragging, "ribbon not dragged");
+        press(&mut h, start - egui::vec2(600.0, 0.0), false);
+        settle(&mut h, 30);
+        let after = h.state().home.sel;
+        assert!(n < 3 || after > before, "drag moved {before} -> {after}");
+        assert!(!h.state().home.dragging);
+        h.state_mut().home.sel = before;
+    }
     h.state_mut().handle(Action::Right);
     snap(&mut h, &dir, "home");
     {
@@ -88,11 +120,13 @@ fn shots() {
     settle(&mut h, 40);
     snap(&mut h, &dir, "game-shots");
     // A Steam game's compatibility tab, its list focused.
+    // Graveyard Keeper 2 when it's there (several versions known).
     let steam_game = h
         .state()
         .games
         .iter()
-        .find(|g| g.compat_id.is_some())
+        .find(|g| g.key == "steam:4358690")
+        .or_else(|| h.state().games.iter().find(|g| g.compat_id.is_some()))
         .map(|g| g.key.clone());
     if let Some(k) = steam_game {
         h.state_mut().game = None;
@@ -103,6 +137,28 @@ fn shots() {
         }
         h.state_mut().handle(Action::Down);
         snap(&mut h, &dir, "game-compat");
+        h.state_mut().handle(Action::Back);
+        // The Versions tab next to it, its list focused (reading only).
+        h.state_mut().handle(Action::Right);
+        for _ in 0..200 {
+            h.step();
+            if h.state().versions.data.is_some() && h.state().versions.loading.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+        h.state_mut().handle(Action::Down);
+        snap(&mut h, &dir, "game-versions");
+        // Tick the version above the installed one and ask to install it;
+        // the question is only looked at and answered No.
+        h.state_mut().handle(Action::Up);
+        h.state_mut().handle(Action::Accept);
+        snap(&mut h, &dir, "game-versions-ticked");
+        h.state_mut().handle(Action::Select);
+        snap(&mut h, &dir, "game-versions-ask");
+        assert!(h.state().versions.ask.is_some());
+        h.state_mut().handle(Action::Back);
+        assert!(h.state().versions.ask.is_none() && h.state().versions.op.is_none());
         h.state_mut().handle(Action::Back);
         h.state_mut().game = None;
     }

@@ -168,9 +168,30 @@ pub fn civil(t: u64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// The local calendar date of a unix time, "dd.mm.yyyy".
 pub fn date(t: u64) -> String {
-    let (y, m, d) = civil(t);
-    format!("{d:02}.{m:02}.{y}")
+    let tt = t as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&tt, &mut tm) }.is_null() {
+        let (y, m, d) = civil(t);
+        return format!("{d:02}.{m:02}.{y}");
+    }
+    format!(
+        "{:02}.{:02}.{}",
+        tm.tm_mday,
+        tm.tm_mon + 1,
+        tm.tm_year + 1900
+    )
+}
+
+/// …and the local time of day, "dd.mm.yyyy hh:mm".
+pub fn date_time(t: u64) -> String {
+    let tt = t as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&tt, &mut tm) }.is_null() {
+        return date(t);
+    }
+    format!("{} {:02}:{:02}", date(t), tm.tm_hour, tm.tm_min)
 }
 
 #[cfg(test)]

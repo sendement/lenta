@@ -48,6 +48,22 @@ Planned: Hydra Launcher.
   library also lists owned games that aren't installed (Play installs
   them) and play time counted on every device.
 
+### Versions (rollback, from steam-downgrader)
+
+A Steam game's page has a Versions tab: the builds this machine knows
+(branches, the client's update log, installs seen, depotcache manifests
+rebuilt by date), with version numbers from Steam's patch notes. An old
+build is downloaded in the background over Steam's own protocol (a CM
+session over WebSocket with the account's sign-in, depot keys, manifests
+and chunks from the CDN, decrypted and checked), taking unchanged files and
+chunks from the install so a delta costs little. Rolling back closes Steam,
+moves the files in (only files the depot lists are removed, so saves stay)
+and locks the game: the appmanifest shows the latest build and is
+read-only, so Steam leaves the game alone; new builds are followed at each
+start. State and downloads are shared with
+[steam-downgrader](https://github.com/sendement/steam-downgrader)
+(`~/.local/share/steam-downgrader`), so either tool sees the other's locks.
+
 Downloads (store pages, art, achievement icons) are kept in `~/.cache/lenta`.
 Settings live in `~/.config/lenta/config.toml`.
 

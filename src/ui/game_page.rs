@@ -41,6 +41,9 @@ impl App {
         if g.compat_id.is_some() && !self.steam.tools.is_empty() {
             v.push(Tab::Compat);
         }
+        if self.can_downgrade(g) {
+            v.push(Tab::Versions);
+        }
         v
     }
 
@@ -51,6 +54,15 @@ impl App {
     }
 
     pub fn game_input(&mut self, a: Action) {
+        // A question about a version is up: A yes, B no.
+        if self.versions.ask.is_some() {
+            match a {
+                Action::Accept => self.versions_answer(true),
+                Action::Back => self.versions_answer(false),
+                _ => {}
+            }
+            return;
+        }
         let shots = self.shot_count();
         let Some(g) = self.page_game() else { return };
         let tabs = self.tabs_of(&g);
@@ -62,6 +74,8 @@ impl App {
             .map(|id| self.steam.mapping.get(&id).cloned())
             .and_then(|cur| choices.iter().position(|c| c.0 == cur))
             .unwrap_or(0);
+        let ver_rows = self.versions.row_count();
+        let ver_start = self.versions.start_row();
         let Some(v) = self.game.as_mut() else { return };
         // A screenshot shown big.
         if let Some(i) = v.shot {
@@ -78,6 +92,23 @@ impl App {
         }
         let tab_i = tabs.iter().position(|t| *t == v.tab).unwrap_or(0);
         let inside = v.focus == INSIDE;
+        // The versions list.
+        if inside && v.tab == Tab::Versions {
+            match a {
+                Action::Up if v.tool_sel == 0 => v.focus = tab_i + 1,
+                Action::Up => v.tool_sel -= 1,
+                Action::Down => v.tool_sel = (v.tool_sel + 1).min(ver_rows.saturating_sub(1)),
+                Action::Back => v.focus = tab_i + 1,
+                Action::Accept => {
+                    let row = v.tool_sel;
+                    self.versions_accept(row);
+                }
+                // X: install the ticked version (asks first).
+                Action::Select => self.versions_install(),
+                _ => {}
+            }
+            return;
+        }
         // The compatibility list.
         if inside && v.tab == Tab::Compat {
             match a {
@@ -148,6 +179,10 @@ impl App {
                     v.focus = INSIDE;
                     v.tool_sel = cur_tool;
                 }
+                Tab::Versions if ver_rows > 0 => {
+                    v.focus = INSIDE;
+                    v.tool_sel = ver_start;
+                }
                 _ => v.scroll = (v.scroll + 160.0).min(v.max_scroll),
             },
             Action::Accept => {
@@ -159,6 +194,9 @@ impl App {
                 } else if v.tab == Tab::Compat {
                     v.focus = INSIDE;
                     v.tool_sel = cur_tool;
+                } else if v.tab == Tab::Versions && ver_rows > 0 {
+                    v.focus = INSIDE;
+                    v.tool_sel = ver_start;
                 }
             }
             _ => {}
@@ -326,6 +364,7 @@ impl App {
         for (i, t) in self.tabs_of(&g).iter().enumerate() {
             let label = match t {
                 Tab::Compat => tr("compat").to_string(),
+                Tab::Versions => tr("versions").to_string(),
                 Tab::Overview => tr("overview").to_string(),
                 Tab::Achievements => match ach {
                     Some((a, b)) => format!("{} {a}/{b}", tr("achievements")),
@@ -397,12 +436,23 @@ impl App {
             Tab::Achievements => self.draw_achievements(ui, body, &g, eased),
             Tab::Screenshots => self.draw_shots(ui, body, &g, eased),
             Tab::Compat => self.draw_compat(ui, body, &g, eased),
+            Tab::Versions => {
+                let (focus, sel) = self
+                    .game
+                    .as_ref()
+                    .map(|v| (v.focus == INSIDE, v.tool_sel))
+                    .unwrap_or((false, 0));
+                self.draw_versions(ui, body, &g, eased, focus, sel)
+            }
         };
         if let Some(v) = self.game.as_mut() {
             v.max_scroll = (content_h - body.height() + 24.0).max(0.0);
             v.scroll = v.scroll.min(v.max_scroll);
         }
         self.draw_big_shot(ui, rect.expand2(vec2(0.0, 60.0)), &g);
+        if self.versions.ask.is_some() {
+            self.draw_versions_ask(ui, rect.expand2(vec2(0.0, 60.0)));
+        }
     }
 
     fn draw_overview(&mut self, ui: &mut Ui, body: Rect, g: &Game, scroll: f32) -> f32 {

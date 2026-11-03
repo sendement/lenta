@@ -3,6 +3,7 @@
 mod account;
 mod app;
 mod config;
+mod downgrade;
 mod fonts;
 mod game;
 mod i18n;
@@ -27,6 +28,17 @@ fn main() -> eframe::Result {
             println!("{:#?}", all.get(&id));
         }
         return Ok(());
+    }
+    // Rolling back from the command line: --versions APP, --install APP N
+    // (the Nth listed version: downloads what's missing, closes Steam,
+    // installs, locks), --unlock APP [--validate].
+    let args: Vec<String> = std::env::args().collect();
+    if let [_, cmd, app, rest @ ..] = args.as_slice()
+        && matches!(cmd.as_str(), "--versions" | "--install" | "--unlock")
+    {
+        let cfg = config::Config::load();
+        i18n::set(cfg.lang);
+        return downgrade_cli(cmd, app, rest);
     }
     // For development: why the account's game list does or doesn't load.
     if std::env::args().nth(1).as_deref() == Some("--owned") {
@@ -126,4 +138,98 @@ fn main() -> eframe::Result {
             Ok(Box::new(app::App::new(cc.egui_ctx.clone())))
         }),
     )
+}
+
+fn downgrade_cli(cmd: &str, app: &str, rest: &[String]) -> eframe::Result {
+    use downgrade::flow;
+    let fail = |e: String| -> eframe::Result {
+        eprintln!("{e}");
+        std::process::exit(1)
+    };
+    if cmd == "--unlock" {
+        return match flow::unlock(app, rest.iter().any(|a| a == "--validate")) {
+            Ok(m) => {
+                println!("{m}");
+                Ok(())
+            }
+            Err(e) => fail(e),
+        };
+    }
+    let Some(l) = flow::load(app) else {
+        return fail(format!("{app}: not installed"));
+    };
+    if cmd == "--versions" {
+        println!(
+            "{} — build {}{}",
+            l.game.name,
+            l.game.buildid,
+            if l.lock.is_some() { " (locked)" } else { "" }
+        );
+        for (i, v) in l.versions.iter().enumerate() {
+            let t = flow::changes(v, &l.actual);
+            let state = if t.is_empty() {
+                "installed".to_string()
+            } else if l.ready(&t) {
+                "downloaded".to_string()
+            } else {
+                format!("{} depots to download", l.jobs(&t).len())
+            };
+            println!(
+                "{i:>3}  {}  {}  v{}  [{}]  {state}",
+                game::date_time(v.time.max(0) as u64),
+                v.title,
+                v.game_version,
+                v.source.label()
+            );
+        }
+        return Ok(());
+    }
+    let Some(n) = rest.first().and_then(|n| n.parse::<usize>().ok()) else {
+        return fail("--install APP N".into());
+    };
+    let Some(v) = l.versions.get(n) else {
+        return fail(format!("no version {n}"));
+    };
+    let target = flow::changes(v, &l.actual);
+    if target.is_empty() {
+        println!("already installed");
+        return Ok(());
+    }
+    let jobs = l.jobs(&target);
+    if !jobs.is_empty() {
+        let Some(acc) = account::Account::load() else {
+            return fail("sign in to Steam first".into());
+        };
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let last = std::sync::Mutex::new(std::time::Instant::now());
+        let r = flow::download_all(&jobs, &acc, &cancel, &|p| {
+            let mut l = last.lock().unwrap();
+            if l.elapsed().as_millis() > 1000 {
+                *l = std::time::Instant::now();
+                eprintln!(
+                    "depot {}/{} {} {}/{} MB, {} KB/s (reused {} MB, unchanged {} MB)",
+                    p.depot + 1,
+                    p.depots,
+                    p.status,
+                    p.stats.done() >> 20,
+                    p.stats.total >> 20,
+                    p.speed >> 10,
+                    p.stats.reused >> 20,
+                    p.stats.unchanged >> 20
+                );
+            }
+        });
+        if let Err(e) = r {
+            return fail(e);
+        }
+        println!("downloaded");
+    }
+    let buildid = (v.exact && v.buildid != 0).then_some(v.buildid);
+    match flow::install(app, &target, buildid) {
+        Ok(m) => {
+            println!("{m}");
+            Ok(())
+        }
+        Err(e) => fail(e),
+    }
 }

@@ -10,10 +10,10 @@ use std::time::Duration;
 use serde_json::Value;
 
 const API: &str = "https://api.steampowered.com";
-/// Signing in as a web browser: its refresh token can be traded for web
-/// API access tokens over HTTPS. (A Steam client token can't: Steam
-/// answers AccessDenied, the client gets those over its own connection.)
-const PLATFORM_WEB_BROWSER: &str = "2";
+/// Signing in as the Steam client: its token opens a CM session, which
+/// downloading old versions needs. Web API access comes from a website
+/// session or, failing that, from the CM (see `access_token`).
+const PLATFORM_STEAM_CLIENT: &str = "1";
 
 fn data_dir() -> PathBuf {
     std::env::var_os("LENTA_DATA")
@@ -83,7 +83,9 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%'
-            && let Some(h) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())
+            && let Some(h) = s
+                .get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
         {
             out.push(h);
             i += 3;
@@ -123,6 +125,20 @@ fn claims(token: &str) -> Option<Value> {
 }
 
 impl Account {
+    /// For the CM sign-in (downloads).
+    pub fn refresh_token(&self) -> &str {
+        &self.refresh_token
+    }
+
+    /// Signed in as the Steam client: its token also opens a CM session,
+    /// which downloading old versions needs.
+    pub fn is_client(&self) -> bool {
+        claims(&self.refresh_token)
+            .and_then(|c| c.get("aud").cloned())
+            .and_then(|aud| aud.as_array().cloned())
+            .is_some_and(|aud| aud.iter().any(|x| x.as_str() == Some("client")))
+    }
+
     fn from_token(name: String, refresh_token: String) -> Option<Account> {
         let c = claims(&refresh_token)?;
         let steamid = c.get("sub")?.as_str()?.to_string();
@@ -151,13 +167,7 @@ impl Account {
             v.get("account_name")?.as_str()?.to_string(),
             v.get("refresh_token")?.as_str()?.to_string(),
         )?;
-        // A Steam client token (from the first version) can't reach the web
-        // API: as good as signed out.
-        let client = claims(&a.refresh_token)
-            .and_then(|c| c.get("aud").cloned())
-            .and_then(|aud| aud.as_array().cloned())
-            .is_some_and(|aud| aud.iter().any(|x| x.as_str() == Some("client")));
-        (a.valid() && !client).then_some(a)
+        a.valid().then_some(a)
     }
 
     fn save(&self) -> Result<(), String> {
@@ -193,12 +203,26 @@ impl Account {
     /// (IAuthenticationService/GenerateAccessTokenForApp answers
     /// AccessDenied to these tokens.)
     fn access_token(&self) -> Result<String, String> {
+        match self.web_session_token() {
+            Ok(t) => Ok(t),
+            // A client token the website won't take: ask the CM, as the
+            // Steam client does.
+            Err(e) if self.is_client() => {
+                let mut cm = crate::downgrade::cm::Cm::logon(&self.name, &self.refresh_token)
+                    .map_err(|c| format!("{e}; CM: {c}"))?;
+                let t = cm.access_token(&self.refresh_token);
+                cm.close();
+                t.map_err(|c| format!("{e}; CM: {c}"))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn web_session_token(&self) -> Result<String, String> {
         if std::env::var_os("LENTA_OFFLINE").is_some() {
             return Err("offline".into());
         }
-        let session: String = (0..12)
-            .map(|_| format!("{:02x}", rand_byte()))
-            .collect();
+        let session: String = (0..12).map(|_| format!("{:02x}", rand_byte())).collect();
         let post = |url: &str, fields: &[(&str, &str)]| {
             crate::net::agent()
                 .post(url)
@@ -216,8 +240,9 @@ impl Account {
                 ("redir", "https://steamcommunity.com/login/home/?goto="),
             ],
         )?;
-        let v: Value = serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        let v: Value =
+            serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
         if let Some(e) = v.get("error") {
             return Err(format!("finalizelogin: {e}"));
         }
@@ -243,11 +268,19 @@ impl Account {
         let s = |k: &str| params.get(k).and_then(Value::as_str).unwrap_or_default();
         let resp = post(
             url,
-            &[("nonce", s("nonce")), ("auth", s("auth")), ("steamID", steamid)],
+            &[
+                ("nonce", s("nonce")),
+                ("auth", s("auth")),
+                ("steamID", steamid),
+            ],
         )?;
         for c in resp.headers().get_all("set-cookie") {
             let Ok(c) = c.to_str() else { continue };
-            let Some(v) = c.split(';').next().and_then(|kv| kv.strip_prefix("steamLoginSecure=")) else {
+            let Some(v) = c
+                .split(';')
+                .next()
+                .and_then(|kv| kv.strip_prefix("steamLoginSecure="))
+            else {
                 continue;
             };
             let v = percent_decode(v);
@@ -291,8 +324,7 @@ impl QrLogin {
             "BeginAuthSessionViaQR",
             &[
                 ("device_friendly_name", &name),
-                ("platform_type", PLATFORM_WEB_BROWSER),
-                ("website_id", "Community"),
+                ("platform_type", PLATFORM_STEAM_CLIENT),
             ],
         )?;
         let s = |k: &str| {
@@ -397,9 +429,7 @@ pub fn owned(a: &Account) -> Result<Vec<Owned>, String> {
 
 /// Ask Steam for the list; says which step failed.
 pub fn fetch_owned(a: &Account) -> Result<Vec<u8>, String> {
-    let token = a
-        .access_token()
-        .map_err(|e| format!("access token: {e}"))?;
+    let token = a.access_token().map_err(|e| format!("access token: {e}"))?;
     let url = format!(
         "{API}/IPlayerService/GetOwnedGames/v1/?access_token={}&steamid={}&include_appinfo=true&include_played_free_games=true&language={}",
         enc(&token),
@@ -429,11 +459,13 @@ fn family_apps(a: &Account, token: &str) -> Option<Value> {
         a.steamid
     );
     let v: Value = serde_json::from_slice(&crate::net::get(&url).ok()?).ok()?;
-    let gid = v.pointer("/response/family_groupid").and_then(|g| match g {
-        Value::String(s) => Some(s.clone()),
-        Value::Number(n) => Some(n.to_string()),
-        _ => None,
-    })?;
+    let gid = v
+        .pointer("/response/family_groupid")
+        .and_then(|g| match g {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        })?;
     let url = format!(
         "{API}/IFamilyGroupsService/GetSharedLibraryApps/v1/?access_token={t}&family_groupid={gid}&include_own=false&include_excluded=false&include_free=false&language={}",
         crate::i18n::steam_lang()
@@ -464,9 +496,17 @@ fn parse_owned(b: &[u8]) -> Option<Vec<Owned>> {
         })
         .collect();
     let mine: std::collections::HashSet<u32> = out.iter().map(|o| o.appid).collect();
-    for a in v.get("family").and_then(Value::as_array).into_iter().flatten() {
+    for a in v
+        .get("family")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         // Games only (app_type 1), not tools or soundtracks.
-        if a.get("app_type").and_then(Value::as_u64).is_some_and(|t| t != 1) {
+        if a.get("app_type")
+            .and_then(Value::as_u64)
+            .is_some_and(|t| t != 1)
+        {
             continue;
         }
         let Some(id) = a.get("appid").and_then(Value::as_u64).map(|i| i as u32) else {

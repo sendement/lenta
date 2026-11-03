@@ -113,6 +113,11 @@ pub struct Out {
     pub clicked: Option<usize>,
     /// Wheel movement over the ribbon (+ towards the next card).
     pub scroll: f32,
+    /// Dragged this frame by this many cards (+ towards the next).
+    pub drag: f32,
+    pub dragging: bool,
+    /// The drag ended this frame.
+    pub released: bool,
     /// Where the selected card is (for the info beside it).
     pub selected: Option<Rect>,
 }
@@ -138,7 +143,7 @@ pub fn draw(
     if games.is_empty() {
         return out;
     }
-    let resp = ui.interact(rect, ui.id().with("ribbon"), Sense::click());
+    let resp = ui.interact(rect, ui.id().with("ribbon"), Sense::click_and_drag());
     let horizontal = cfg.orientation == Orientation::Horizontal;
     let dir = if cfg.reverse { -1.0 } else { 1.0 };
     let mut size = base_size(cfg);
@@ -165,6 +170,14 @@ pub fn draw(
     let gap = cfg.spacing * fit;
     let first_step = along * sel_scale / 2.0 + gap + along * tight / 2.0;
     let step = along * tight + gap;
+    // Held and moved: the cards follow the pointer, a card per step.
+    if resp.dragged() {
+        let d = resp.drag_delta();
+        let along_d = if horizontal { d.x } else { d.y };
+        out.drag = -along_d * dir / step.max(1.0);
+        out.dragging = true;
+    }
+    out.released = resp.drag_stopped();
     let offset = |d: f32| -> f32 {
         let a = d.abs();
         let s = if a <= 1.0 {

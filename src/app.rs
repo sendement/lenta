@@ -49,6 +49,10 @@ pub struct Ribbon {
     /// Animated position (index in the middle).
     pub pos: f32,
     pub wheel: f32,
+    /// Held and dragged with the mouse: the ribbon follows the pointer.
+    pub dragging: bool,
+    /// Cards a second while dragged, for the flick on release.
+    pub vel: f32,
 }
 
 #[derive(Default)]
@@ -68,6 +72,7 @@ pub enum Tab {
     Achievements,
     Screenshots,
     Compat,
+    Versions,
 }
 
 pub struct GameView {
@@ -117,6 +122,8 @@ pub struct App {
     pub steam: crate::ui::steam::SteamData,
     /// Signing in to Steam, while its window is up.
     pub login: Option<crate::ui::steam::Login>,
+    /// The Versions tab: builds, a download, a rollback.
+    pub versions: crate::ui::versions::Versions,
     pub apps: Vec<desktop::App>,
     pub scanning: bool,
     scan_tx: Sender<Scan>,
@@ -170,6 +177,7 @@ impl App {
             games: Vec::new(),
             steam: Default::default(),
             login: None,
+            versions: Default::default(),
             apps: Vec::new(),
             scanning: false,
             scan_tx,
@@ -221,6 +229,17 @@ impl App {
             let mut games = sources::scan(&cfg);
             let apps = apps.join().unwrap_or_default();
             let mut steam = crate::ui::steam::SteamData::local(&cfg);
+            // Like steam-downgrader at start: remember installs seen (they
+            // stay rollback targets) and keep locks ahead of new builds.
+            if cfg.steam
+                && std::env::var_os("LENTA_DRY_RUN").is_none()
+                && let Some(root) = sources::steam::roots().into_iter().next()
+            {
+                crate::downgrade::ops::snapshot_installed(&root);
+                for (name, old, new) in crate::downgrade::ops::relock(&root) {
+                    eprintln!("lenta: {name}: locked build follows Steam {old} → {new}");
+                }
+            }
             // What's on disk shows at once; store matches, the account's
             // other games and art follow.
             let _ = tx.send(Scan {
@@ -504,6 +523,17 @@ impl App {
             }
             let installed = self.game_by_key(&v.key).is_none_or(|g| g.installed);
             let play = if installed { tr("play") } else { tr("install") };
+            if self.versions.ask.is_some() {
+                return vec![(Btn::A, tr("yes")), (Btn::B, tr("cancel"))];
+            }
+            if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Versions {
+                return vec![
+                    (Btn::A, tr("sd_tick")),
+                    (Btn::X, tr("sd_install")),
+                    (Btn::Dpad, tr("scroll")),
+                    (Btn::B, tr("back")),
+                ];
+            }
             if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Compat {
                 return vec![
                     (Btn::A, tr("choose")),
@@ -592,6 +622,7 @@ impl App {
             || self.toast.is_some()
             || self.scanning
             || self.steam.restart.is_some()
+            || self.versions.op.is_some()
     }
 
     pub fn ease(&self, rate: f32) -> f32 {
@@ -612,6 +643,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.take_scan();
         self.pump_restart();
+        self.pump_versions();
         self.images.pump();
         self.store.pump();
         // The pad is read globally; never act on it while another window

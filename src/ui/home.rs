@@ -250,10 +250,13 @@ impl App {
             );
             return;
         }
-        let k = self.ease(9.0);
-        self.home.pos += (self.home.sel as f32 - self.home.pos) * k;
-        if (self.home.pos - self.home.sel as f32).abs() < 0.001 {
-            self.home.pos = self.home.sel as f32;
+        // While dragged the ribbon sits where the pointer put it.
+        if !self.home.dragging {
+            let k = self.ease(9.0);
+            self.home.pos += (self.home.sel as f32 - self.home.pos) * k;
+            if (self.home.pos - self.home.sel as f32).abs() < 0.001 {
+                self.home.pos = self.home.sel as f32;
+            }
         }
         let horizontal = self.cfg.orientation == Orientation::Horizontal;
         let (band, info) = if horizontal {
@@ -301,6 +304,22 @@ impl App {
                 self.home.sel = i;
             }
             self.side_focus = false;
+        }
+        let last = (self.games.len() - 1) as f32;
+        if out.dragging {
+            self.home.dragging = true;
+            self.side_focus = false;
+            self.home.pos = (self.home.pos + out.drag).clamp(-0.4, last + 0.4);
+            self.home.sel = self.home.pos.round().clamp(0.0, last) as usize;
+            let v = out.drag / self.dt.max(0.001);
+            self.home.vel = self.home.vel * 0.7 + v * 0.3;
+        }
+        if out.released {
+            // A flick carries on a little.
+            let to = self.home.pos + (self.home.vel * 0.18).clamp(-6.0, 6.0);
+            self.home.sel = to.round().clamp(0.0, last) as usize;
+            self.home.dragging = false;
+            self.home.vel = 0.0;
         }
         self.home.wheel += out.scroll;
         while self.home.wheel.abs() >= 50.0 {
