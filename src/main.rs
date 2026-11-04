@@ -12,6 +12,7 @@ mod images;
 mod input;
 mod keyboard;
 mod maint;
+mod modules;
 mod music;
 mod net;
 mod protonup;

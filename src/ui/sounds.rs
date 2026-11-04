@@ -45,6 +45,8 @@ impl App {
         }
         self.sounds.loaded = true;
         self.sounds.installed = sfx::packs();
+        // Last time's list at once; the fresh one replaces it when it comes.
+        self.sounds.listed = sfx::store_saved().map(Ok);
         let (tx, rx) = crossbeam_channel::bounded(1);
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
@@ -164,8 +166,21 @@ impl App {
         if let Some(rx) = &self.sounds.loading
             && let Ok(r) = rx.try_recv()
         {
-            self.sounds.listed = Some(r);
             self.sounds.loading = None;
+            match r {
+                Ok(l) => {
+                    sfx::store_keep(&l);
+                    if self.sounds.listed != Some(Ok(l.clone())) {
+                        self.sounds.listed = Some(Ok(l));
+                    }
+                }
+                // Offline: keep last time's list if there is one.
+                Err(e) => {
+                    if !matches!(self.sounds.listed, Some(Ok(_))) {
+                        self.sounds.listed = Some(Err(e));
+                    }
+                }
+            }
         }
         let done = self
             .sounds
@@ -203,8 +218,8 @@ impl App {
         );
         // The two tabs.
         let store_label = match (&self.sounds.listed, self.sounds.loading.is_some()) {
-            (_, true) => format!("{} · {}", tr("sounds_store_tab"), tr("loading")),
             (Some(Ok(l)), _) => format!("{} · {}", tr("sounds_store_tab"), l.len()),
+            (_, true) => format!("{} · {}", tr("sounds_store_tab"), tr("loading")),
             _ => tr("sounds_store_tab").to_string(),
         };
         let labels = vec![

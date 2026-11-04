@@ -49,6 +49,7 @@ impl App {
         if self.sgdb.has_key == Some(true) {
             v.push(Tab::Art);
         }
+        v.extend(self.mod_tabs(g));
         v
     }
 
@@ -201,6 +202,17 @@ impl App {
             }
             return;
         }
+        // A module's tab: its own page.
+        if inside && let Tab::Module(_) = v.tab {
+            let at_top = self.mods.game.as_ref().is_none_or(|m| m.at_top());
+            if ((a == Action::Up && at_top)
+                || self.modview_input(crate::ui::modules::Which::Game, a))
+                && let Some(v) = self.game.as_mut()
+            {
+                v.focus = tab_i + 1;
+            }
+            return;
+        }
         // The versions list.
         if inside && v.tab == Tab::Versions {
             match a {
@@ -312,6 +324,7 @@ impl App {
                     v.focus = INSIDE;
                     v.tool_sel = 0;
                 }
+                Tab::Module(_) => v.focus = INSIDE,
                 _ => {
                     v.folded |= v.overflow;
                     v.scroll = (v.scroll + 160.0).min(v.max_scroll);
@@ -329,6 +342,8 @@ impl App {
                 } else if v.tab == Tab::Versions && ver_rows > 0 {
                     v.focus = INSIDE;
                     v.tool_sel = ver_start;
+                } else if matches!(v.tab, Tab::Module(_)) {
+                    v.focus = INSIDE;
                 } else if (v.tab == Tab::Achievements && ach_rows > 0)
                     || (v.tab == Tab::Art && art_rows > 0)
                 {
@@ -588,6 +603,7 @@ impl App {
                     None => tr("achievements").to_string(),
                 },
                 Tab::Screenshots => tr("screenshots").to_string(),
+                Tab::Module(i) => self.mod_tab_label(*i),
             };
             let galley = p.layout_no_wrap(label, FontId::proportional(19.0), Color32::WHITE);
             let r = Rect::from_min_size(pos2(tx, row_y + 6.0), galley.size() + vec2(36.0, 22.0));
@@ -676,6 +692,10 @@ impl App {
                     .map(|v| (v.focus == INSIDE, v.tool_sel))
                     .unwrap_or((false, 0));
                 self.draw_art(ui, body, &g, eased, focus, sel)
+            }
+            Tab::Module(i) => {
+                let focus = self.game.as_ref().is_some_and(|v| v.focus == INSIDE);
+                self.draw_mod_tab(ui, body, &g, i, eased, focus)
             }
         };
         if let Some(v) = self.game.as_mut() {

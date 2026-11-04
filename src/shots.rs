@@ -17,6 +17,8 @@ fn harness(size: [f32; 2]) -> Harness<'static, App> {
         std::env::set_var("LENTA_NO_GAMEPAD", "1");
         // Never start a game, Steam or a program from a test.
         std::env::set_var("LENTA_DRY_RUN", "1");
+        // None of the user's modules (a test puts in the example).
+        std::env::set_var("LENTA_MODULES", cfg.join("no-modules"));
     }
     let _ = std::fs::remove_file(cfg.join("config.toml"));
     Harness::builder()
@@ -621,4 +623,310 @@ fn sounds_follow_mouse() {
     let got = heard(&mut h);
     eprintln!("click: {got:?} filter {}", h.state().lib.filter);
     assert!(got.contains(&Sound::Activate), "click silent");
+}
+
+/// Modules: the example's section, its window, its tab on a game's page.
+#[test]
+#[ignore]
+fn modules() {
+    use crate::app::{Page, Tab};
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    // Nothing yet: the empty Modules section.
+    h.state_mut().go(Page::Modules);
+    snap(&mut h, &dir, "modules-empty");
+    let ex = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/modules");
+    h.state_mut().mods = crate::ui::modules::Mods::load_from(vec![(only(&ex, "demo"), false)]);
+    assert_eq!(h.state().mods.list.len(), 1);
+    assert!(h.state().pages().contains(&Page::Module(0)));
+    snap(&mut h, &dir, "modules");
+    // Its section: the module's main page, as it draws it.
+    h.state_mut().handle(Action::Accept);
+    assert_eq!(h.state().page, Page::Module(0));
+    let wait = |h: &mut Harness<'static, App>, w: fn(&App) -> bool| {
+        for _ in 0..200 {
+            h.step();
+            if w(h.state()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the module didn't answer");
+    };
+    wait(&mut h, |a| {
+        a.mods
+            .page
+            .as_ref()
+            .is_some_and(|v| v.page.is_some() && !v.busy())
+    });
+    // The switch, the slider one step, the choice one on.
+    h.state_mut().handle(Action::Accept);
+    h.state_mut().handle(Action::Down);
+    h.state_mut().handle(Action::Right);
+    h.state_mut().handle(Action::Down);
+    h.state_mut().handle(Action::Right);
+    wait(&mut h, |a| a.mods.page.as_ref().is_some_and(|v| !v.busy()));
+    snap(&mut h, &dir, "module-page");
+    let items = h
+        .state()
+        .mods
+        .page
+        .as_ref()
+        .unwrap()
+        .page
+        .clone()
+        .unwrap()
+        .items;
+    use crate::modules::Kind;
+    assert_eq!(
+        items[1].kind,
+        Kind::Toggle(false),
+        "the module kept the switch"
+    );
+    assert!(matches!(items[2].kind, Kind::Slider { value, .. } if value == 4.0));
+    // A page further in, and back.
+    for _ in 0..2 {
+        h.state_mut().handle(Action::Down);
+    }
+    h.state_mut().handle(Action::Accept);
+    wait(&mut h, |a| {
+        a.mods
+            .page
+            .as_ref()
+            .is_some_and(|v| v.stack.len() == 2 && v.page.is_some())
+    });
+    snap(&mut h, &dir, "module-subpage");
+    h.state_mut().handle(Action::Back);
+    assert_eq!(h.state().mods.page.as_ref().unwrap().stack.len(), 1);
+    // Kept to Modules: off the side panel, opens as a window.
+    h.state_mut().go(Page::Modules);
+    h.state_mut().handle(Action::Actions);
+    assert!(!h.state().pages().contains(&Page::Module(0)));
+    h.state_mut().handle(Action::Accept);
+    assert!(h.state().mods.over.is_some());
+    wait(&mut h, |a| {
+        a.mods.over.as_ref().is_some_and(|v| v.page.is_some())
+    });
+    snap(&mut h, &dir, "module-window");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().mods.over.is_none());
+    // Its tab on a game's page.
+    let key = h.state().games.first().map(|g| g.key.clone());
+    if let Some(key) = key {
+        h.state_mut().open_game(key);
+        let tab = h.state().game.as_ref().map(|v| {
+            let g = h.state().game_by_key(&v.key).unwrap().clone();
+            h.state().tabs_of(&g)
+        });
+        let tabs = tab.unwrap();
+        let i = tabs
+            .iter()
+            .position(|t| matches!(t, Tab::Module(_)))
+            .expect("module tab");
+        {
+            let v = h.state_mut().game.as_mut().unwrap();
+            v.tab = tabs[i];
+            v.focus = i + 1;
+        }
+        h.state_mut().handle(Action::Down);
+        wait(&mut h, |a| {
+            a.mods.game.as_ref().is_some_and(|v| v.page.is_some())
+        });
+        h.state_mut().handle(Action::Accept);
+        wait(&mut h, |a| a.mods.game.as_ref().is_some_and(|v| !v.busy()));
+        snap(&mut h, &dir, "module-game-tab");
+        let items = h
+            .state()
+            .mods
+            .game
+            .as_ref()
+            .unwrap()
+            .page
+            .clone()
+            .unwrap()
+            .items;
+        assert_eq!(items[0].kind, Kind::Toggle(true));
+        assert!(!items[1].disabled, "on for the game: the slider wakes");
+    }
+    // The module gone (its package removed): the section with it.
+    h.state_mut().game = None;
+    h.state_mut().go(Page::Modules);
+    h.state_mut().handle(Action::Actions);
+    h.state_mut().go(Page::Module(0));
+    let empty = cfg_dir().join("no-modules");
+    h.state_mut().mods.dirs = vec![(empty, false)];
+    h.state_mut().mods_rescan_now();
+    assert_eq!(h.state().page, Page::Home);
+    assert!(
+        !h.state()
+            .pages()
+            .iter()
+            .any(|p| matches!(p, Page::Module(_)))
+    );
+}
+
+/// A modules folder with just this one of the examples.
+fn only(ex: &std::path::Path, id: &str) -> PathBuf {
+    let d = cfg_dir().join(format!("modules-{id}"));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    std::os::unix::fs::symlink(ex.join(id), d.join(id)).unwrap();
+    d
+}
+
+fn cfg_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("lenta-test-{}", std::process::id()))
+}
+
+/// The System module: its own side panel (Wi-Fi, Bluetooth, About), pages
+/// asked again while shown. A dry run: it reads, changes nothing.
+#[test]
+#[ignore]
+fn system_module() {
+    use crate::app::Page;
+    use crate::modules::Kind;
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    settle(&mut h, 5);
+    let ex = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/modules");
+    h.state_mut().mods = crate::ui::modules::Mods::load_from(vec![(only(&ex, "system"), false)]);
+    let i = h
+        .state()
+        .mods
+        .list
+        .iter()
+        .position(|m| m.id == "system")
+        .unwrap();
+    h.state_mut().go(Page::Module(i as u16));
+    let wait = |h: &mut Harness<'static, App>, w: &dyn Fn(&App) -> bool| {
+        for _ in 0..300 {
+            h.step();
+            if w(h.state()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the module didn't answer");
+    };
+    let ready = |a: &App| {
+        a.mods
+            .page
+            .as_ref()
+            .is_some_and(|v| v.page.is_some() && !v.busy())
+    };
+    wait(&mut h, &ready);
+    {
+        let v = h.state().mods.page.as_ref().unwrap();
+        assert_eq!(v.nav.len(), 3, "its panel");
+        assert!(v.side, "the choice starts in the panel");
+        assert_eq!(v.stack, vec!["main".to_string()]);
+    }
+    snap(&mut h, &dir, "system-wifi");
+    // ↓ in the panel: the next section at once.
+    h.state_mut().handle(Action::Down);
+    wait(&mut h, &|a: &App| {
+        a.mods
+            .page
+            .as_ref()
+            .is_some_and(|v| v.stack == ["bluetooth"] && v.page.is_some())
+    });
+    snap(&mut h, &dir, "system-bluetooth");
+    h.state_mut().handle(Action::Down);
+    wait(&mut h, &|a: &App| {
+        a.mods
+            .page
+            .as_ref()
+            .is_some_and(|v| v.stack == ["about"] && v.page.is_some())
+    });
+    snap(&mut h, &dir, "system-about");
+    // Back to Wi-Fi, into the page: the switch (a dry run: it stays on).
+    h.state_mut().handle(Action::Up);
+    h.state_mut().handle(Action::Up);
+    wait(&mut h, &|a: &App| {
+        a.mods
+            .page
+            .as_ref()
+            .is_some_and(|v| v.stack == ["wifi"] && v.page.is_some() && !v.busy())
+    });
+    h.state_mut().handle(Action::Right);
+    assert!(!h.state().mods.page.as_ref().unwrap().side);
+    let first = |a: &App| {
+        a.mods.page.as_ref().unwrap().page.as_ref().unwrap().items[0]
+            .kind
+            .clone()
+    };
+    let was = first(h.state());
+    h.state_mut().handle(Action::Accept);
+    wait(&mut h, &|a: &App| {
+        a.mods.page.as_ref().is_some_and(|v| !v.busy())
+    });
+    assert_eq!(first(h.state()), was, "a dry run changed nothing");
+    assert!(
+        h.state()
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.0.contains("nmcli")),
+        "told what it would do: {:?}",
+        h.state().toast
+    );
+    // A network: its page, then back.
+    let net = h
+        .state()
+        .mods
+        .page
+        .as_ref()
+        .unwrap()
+        .page
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .position(|it| matches!(&it.kind, Kind::Link { page, .. } if page.starts_with("net:")));
+    if let Some(n) = net {
+        h.state_mut().mods.page.as_mut().unwrap().sel = n;
+        h.state_mut().handle(Action::Accept);
+        wait(&mut h, &|a: &App| {
+            a.mods
+                .page
+                .as_ref()
+                .is_some_and(|v| v.stack.len() == 2 && v.page.is_some())
+        });
+        snap(&mut h, &dir, "system-network");
+        h.state_mut().handle(Action::Back);
+        assert_eq!(h.state().mods.page.as_ref().unwrap().stack.len(), 1);
+        wait(&mut h, &ready);
+    }
+    // A danger button asks first.
+    let items = h
+        .state()
+        .mods
+        .page
+        .as_ref()
+        .unwrap()
+        .page
+        .clone()
+        .unwrap()
+        .items;
+    let danger = items
+        .iter()
+        .position(|it| matches!(it.kind, Kind::Button { danger: true, .. }))
+        .unwrap();
+    h.state_mut().mods.page.as_mut().unwrap().sel = danger;
+    h.state_mut().handle(Action::Accept);
+    assert!(h.state().confirm.is_some());
+    snap(&mut h, &dir, "system-ask");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().confirm.is_none());
+    // Back from the page: to its panel; again: home.
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().mods.page.as_ref().unwrap().side);
+    h.state_mut().handle(Action::Back);
+    assert_eq!(h.state().page, Page::Home);
 }

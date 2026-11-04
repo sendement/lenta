@@ -94,6 +94,27 @@ pub struct Config {
     /// …and for the card chosen on the ribbon, after a moment.
     pub theme_music_ribbon: bool,
     pub music_volume: f32,
+    /// Modules turned off or shown otherwise than they ask (by id).
+    pub modules: std::collections::BTreeMap<String, ModCfg>,
+}
+
+/// The user's word on a module.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModCfg {
+    pub on: bool,
+    /// A section in the side panel (true), only in Modules (false); none:
+    /// as the module asks.
+    pub section: Option<bool>,
+}
+
+impl Default for ModCfg {
+    fn default() -> Self {
+        ModCfg {
+            on: true,
+            section: None,
+        }
+    }
 }
 
 impl Default for Config {
@@ -134,6 +155,7 @@ impl Default for Config {
             sound_volume: 0.5,
             theme_music_ribbon: true,
             music_volume: 0.35,
+            modules: Default::default(),
         }
     }
 }

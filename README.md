@@ -105,6 +105,20 @@ through the instance and kept in `~/.cache/lenta/music`.
 Downloads (store pages, art, achievement icons) are kept in `~/.cache/lenta`.
 Settings live in `~/.config/lenta/config.toml`.
 
+### Modules
+
+Other programs can add to lenta: a section of their own (a package with
+system settings, say), or a tab on every game's page (per-game settings for
+a frame generation layer). A module is a folder with `module.json` and a
+program in any language that answers with its pages as JSON; lenta draws
+them, so they work with the pad. Packages put modules in
+`/usr/share/lenta/modules`, your own go in `~/.local/share/lenta/modules`;
+removing a package takes its section away. In **Modules** each can be turned
+off and shown as a section or only there. See [docs/modules.md](docs/modules.md)
+and the examples: `examples/modules/system` (Wi-Fi, Bluetooth and About, with
+a side panel of its own) and `examples/modules/demo` (every kind of item and
+a game tab).
+
 ## Controls
 
 | Pad | Keyboard | |

@@ -27,6 +27,8 @@ pub struct Osk {
     prev: Option<char>,
     /// Runs with the text on OK.
     done: Option<Done>,
+    /// A password: dots shown, kept as typed (not trimmed).
+    pub secret: bool,
 }
 
 impl Osk {
@@ -162,6 +164,7 @@ impl App {
             caps: false,
             prev: None,
             done: Some(Box::new(done)),
+            secret: false,
         });
     }
 
@@ -170,7 +173,8 @@ impl App {
             && let Some(f) = o.done.take()
         {
             let s: String = o.text.iter().collect();
-            f(self, s.trim().to_string());
+            let s = if o.secret { s } else { s.trim().to_string() };
+            f(self, s);
         }
     }
 
@@ -287,8 +291,9 @@ impl App {
         p.rect_filled(field, 14.0, Color32::from_white_alpha(14));
         p.rect_stroke(field, 14.0, Stroke::new(2.0, c1), StrokeKind::Inside);
         let font = FontId::proportional(22.0);
-        let all: String = o.text.iter().collect();
-        let head: String = o.text[..o.caret].iter().collect();
+        let shown = |c: &char| if o.secret { '•' } else { *c };
+        let all: String = o.text.iter().map(shown).collect();
+        let head: String = o.text[..o.caret].iter().map(shown).collect();
         let g = p.layout_no_wrap(all, font.clone(), Color32::WHITE);
         let caret_x = p.layout_no_wrap(head, font, Color32::WHITE).size().x;
         let room = field.width() - 40.0;

@@ -311,6 +311,12 @@ pub enum Icon {
     Play,
     Clock,
     Trophy,
+    /// Modules: four blocks, one set apart.
+    Module,
+    Wifi,
+    Bluetooth,
+    /// Three sliders: system settings.
+    Sliders,
 }
 
 pub fn icon(p: &Painter, c: Pos2, s: f32, icon: Icon, color: Color32) {
@@ -368,6 +374,64 @@ pub fn icon(p: &Painter, c: Pos2, s: f32, icon: Icon, color: Color32) {
             p.circle_stroke(c, h * 0.9, st);
             p.circle_filled(c + vec2(0.0, -h * 0.4), s * 0.06, color);
             p.line_segment([c + vec2(0.0, -h * 0.1), c + vec2(0.0, h * 0.5)], st);
+        }
+        Icon::Sliders => {
+            for (k, at) in [(-1.0f32, 0.35f32), (0.0, -0.4), (1.0, 0.15)] {
+                let y = c.y + k * h * 0.62;
+                p.add(Shape::line_segment(
+                    [pos2(c.x - h * 0.85, y), pos2(c.x + h * 0.85, y)],
+                    st,
+                ));
+                p.circle_filled(pos2(c.x + at * h, y), st.width * 1.9, st.color);
+            }
+        }
+        Icon::Wifi => {
+            // Three arcs over a dot.
+            let base = c + vec2(0.0, h * 0.7);
+            for r in [h * 0.55, h * 1.0, h * 1.45] {
+                let arc: Vec<Pos2> = (0..=10)
+                    .map(|k| {
+                        let a = -std::f32::consts::FRAC_PI_2 - 0.75 + 1.5 * k as f32 / 10.0;
+                        base + vec2(r * a.cos(), r * a.sin())
+                    })
+                    .collect();
+                p.add(Shape::line(arc, st));
+            }
+            p.circle_filled(base, st.width * 0.9, st.color);
+        }
+        Icon::Bluetooth => {
+            // The rune: a spine and two loops to the right.
+            let x = h * 0.42;
+            let pts = vec![
+                c + vec2(-x, -h * 0.45),
+                c + vec2(x, h * 0.42),
+                c + vec2(0.0, h * 0.9),
+                c + vec2(0.0, -h * 0.9),
+                c + vec2(x, -h * 0.42),
+                c + vec2(-x, h * 0.45),
+            ];
+            p.add(Shape::line(pts, st));
+        }
+        Icon::Module => {
+            let b = h * 0.78;
+            let g = h * 0.16;
+            for (dx, dy, lift) in [
+                (-1.0, -1.0, 0.0),
+                (-1.0, 1.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (1.0, -1.0, 1.0),
+            ] {
+                let o = c + vec2(
+                    dx * (b / 2.0 + g / 2.0) + lift * g,
+                    dy * (b / 2.0 + g / 2.0) - lift * g,
+                );
+                p.rect_stroke(
+                    Rect::from_center_size(o, vec2(b, b)),
+                    b * 0.22,
+                    st,
+                    egui::StrokeKind::Middle,
+                );
+            }
         }
         Icon::Sound => {
             // A speaker and two waves.

@@ -1,0 +1,12 @@
+{
+  "id": "system",
+  "name": { "en": "System", "ru": "Система" },
+  "description": {
+    "en": "Wi-Fi, Bluetooth and what this device is. NetworkManager and BlueZ.",
+    "ru": "Wi-Fi, Bluetooth и сведения об устройстве. Через NetworkManager и BlueZ."
+  },
+  "version": "1.0",
+  "exec": ["python3", "system.py"],
+  "icon": "sliders",
+  "show": "section"
+}

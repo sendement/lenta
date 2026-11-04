@@ -1,0 +1,13 @@
+{
+  "id": "demo",
+  "name": { "en": "Module example", "ru": "Пример модуля" },
+  "description": {
+    "en": "Shows what a module can draw: switches, sliders, choices, pages, a tab on a game's page.",
+    "ru": "Показывает, что может модуль: переключатели, ползунки, выбор, страницы, вкладка на странице игры."
+  },
+  "version": "1.0",
+  "exec": ["python3", "demo.py"],
+  "icon": "icon.png",
+  "show": "section",
+  "game": { "label": { "en": "Example", "ru": "Пример" } }
+}

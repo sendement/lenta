@@ -21,21 +21,15 @@ pub enum Page {
     System,
     Proton,
     Sounds,
+    /// A module's own section (its place in the modules' list).
+    Module(u16),
+    /// Modules: on/off, how each is shown; opens those kept off the panel.
+    Modules,
     Settings,
     About,
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
-        Page::Home,
-        Page::Library,
-        Page::System,
-        Page::Proton,
-        Page::Sounds,
-        Page::Settings,
-        Page::About,
-    ];
-
     pub fn key(self) -> &'static str {
         match self {
             Page::Home => "home",
@@ -43,6 +37,8 @@ impl Page {
             Page::System => "system",
             Page::Proton => "proton",
             Page::Sounds => "sound_store",
+            Page::Module(_) => "modules",
+            Page::Modules => "modules",
             Page::Settings => "settings",
             Page::About => "about",
         }
@@ -80,6 +76,23 @@ pub enum Tab {
     Compat,
     Versions,
     Art,
+    /// A module's tab (its place in the modules' list).
+    Module(u16),
+}
+
+impl Tab {
+    /// A number for each (the sound watcher compares them).
+    pub fn no(self) -> usize {
+        match self {
+            Tab::Overview => 0,
+            Tab::Achievements => 1,
+            Tab::Screenshots => 2,
+            Tab::Compat => 3,
+            Tab::Versions => 4,
+            Tab::Art => 5,
+            Tab::Module(i) => 6 + i as usize,
+        }
+    }
 }
 
 pub struct GameView {
@@ -168,6 +181,8 @@ pub struct App {
     pub sfx: crate::sfx::Sfx,
     /// The sound packs page.
     pub sounds: crate::ui::sounds::SoundsPage,
+    /// External modules and their pages as shown.
+    pub mods: crate::ui::modules::Mods,
     /// The Proton page.
     pub proton: crate::ui::proton::ProtonPage,
     /// A question before an action that can't be undone.
@@ -268,6 +283,7 @@ impl App {
             proton: Default::default(),
             sfx: crate::sfx::Sfx::new(),
             sounds: Default::default(),
+            mods: crate::ui::modules::Mods::load(),
             apps: Vec::new(),
             scanning: false,
             scan_tx,
@@ -474,7 +490,25 @@ impl App {
 
     pub fn go(&mut self, page: Page) {
         self.page = page;
-        self.side_sel = Page::ALL.iter().position(|p| *p == page).unwrap_or(0);
+        self.side_sel = self.pages().iter().position(|p| *p == page).unwrap_or(0);
+    }
+
+    /// The side panel's sections: modules' own ones before Modules.
+    pub fn pages(&self) -> Vec<Page> {
+        let mut v = vec![
+            Page::Home,
+            Page::Library,
+            Page::System,
+            Page::Proton,
+            Page::Sounds,
+        ];
+        for (i, m) in self.mods.list.iter().enumerate() {
+            if self.mod_section(m) {
+                v.push(Page::Module(i as u16));
+            }
+        }
+        v.extend([Page::Modules, Page::Settings, Page::About]);
+        v
     }
 
     /// The accent wanted now: set colours, or the selected card's.
@@ -566,6 +600,7 @@ impl App {
             || self.osk.is_some()
             || self.menu.is_some()
             || self.cedit.is_some()
+            || self.mods.over.is_some()
     }
 
     fn nav_mark(&self) -> NavMark {
@@ -575,8 +610,12 @@ impl App {
             modal: self.modal_open(),
             game: g.is_some(),
             side: self.side_focus,
-            page: Page::ALL.iter().position(|p| *p == self.page).unwrap_or(0),
-            tab: g.map_or(0, |v| v.tab as usize),
+            page: self
+                .pages()
+                .iter()
+                .position(|p| *p == self.page)
+                .unwrap_or(0),
+            tab: g.map_or(0, |v| v.tab.no()),
             sel: vec![
                 self.side_sel as i64,
                 self.home.sel as i64,
@@ -599,6 +638,11 @@ impl App {
                 o(self.menu.as_ref().map(|m| m.sel)),
                 o(self.cedit.as_ref().map(|e| e.sel)),
                 o(self.cedit.as_ref().map(|e| e.btn)),
+                self.mods.sel as i64,
+                o(self.mods.page.as_ref().map(|v| v.sel)),
+                o(self.mods.over.as_ref().map(|v| v.sel)),
+                o(self.mods.game.as_ref().map(|v| v.sel)),
+                self.mods.depth() as i64,
             ],
         }
     }
@@ -668,7 +712,10 @@ impl App {
             )
         };
         let before = snap(self);
+        let pre = self.sfx.take_played();
         self.handle_quiet(a);
+        // What the action played itself (a switch, a slider) stands alone.
+        let own = self.sfx.take_played();
         let after = snap(self);
         let sound = if before.3 != after.3 {
             Some(if after.3 {
@@ -710,8 +757,13 @@ impl App {
                 _ => None,
             }
         };
-        if let Some(s) = sound {
+        if let Some(s) = sound
+            && !own
+        {
             self.sfx.play(s);
+        }
+        if pre || own {
+            self.sfx.mark_played();
         }
     }
 
@@ -736,6 +788,12 @@ impl App {
             self.cedit_input(a);
             return;
         }
+        if self.mods.over.is_some() {
+            if self.modview_input(crate::ui::modules::Which::Over, a) {
+                self.mods.over = None;
+            }
+            return;
+        }
         if self.menu.is_some() {
             self.menu_input(a);
             return;
@@ -747,17 +805,22 @@ impl App {
         }
         match a {
             Action::PrevTab | Action::NextTab => {
-                let i = Page::ALL.iter().position(|p| *p == self.page).unwrap_or(0) as i32;
-                let n = Page::ALL.len() as i32;
+                let pages = self.pages();
+                let i = pages.iter().position(|p| *p == self.page).unwrap_or(0) as i32;
+                let n = pages.len() as i32;
                 let j = (i + if a == Action::NextTab { 1 } else { -1 }).rem_euclid(n);
-                self.go(Page::ALL[j as usize]);
+                self.go(pages[j as usize]);
                 self.side_focus = false;
                 self.set.color_edit = None;
                 return;
             }
             Action::View => {
                 self.side_focus = !self.side_focus;
-                self.side_sel = Page::ALL.iter().position(|p| *p == self.page).unwrap_or(0);
+                self.side_sel = self
+                    .pages()
+                    .iter()
+                    .position(|p| *p == self.page)
+                    .unwrap_or(0);
                 return;
             }
             Action::Menu => {
@@ -768,11 +831,12 @@ impl App {
             _ => {}
         }
         if self.side_focus {
+            let pages = self.pages();
             match a {
                 Action::Up => self.side_sel = self.side_sel.saturating_sub(1),
-                Action::Down => self.side_sel = (self.side_sel + 1).min(Page::ALL.len() - 1),
+                Action::Down => self.side_sel = (self.side_sel + 1).min(pages.len() - 1),
                 Action::Accept => {
-                    self.go(Page::ALL[self.side_sel]);
+                    self.go(pages[self.side_sel.min(pages.len() - 1)]);
                     self.side_focus = false;
                 }
                 Action::Back => self.side_focus = false,
@@ -780,7 +844,7 @@ impl App {
             }
             // Moving in the panel shows the page at once.
             if matches!(a, Action::Up | Action::Down) {
-                self.page = Page::ALL[self.side_sel];
+                self.page = pages[self.side_sel.min(pages.len() - 1)];
             }
             return;
         }
@@ -794,6 +858,8 @@ impl App {
             Page::About => a == Action::Back,
             Page::Proton => self.proton_input(a),
             Page::Sounds => self.sounds_input(a),
+            Page::Module(_) => self.modview_input(crate::ui::modules::Which::Page, a),
+            Page::Modules => self.modules_input(a),
         };
         if back && self.page != Page::Home {
             self.go(Page::Home);
@@ -825,6 +891,9 @@ impl App {
         }
         if self.menu.is_some() {
             return vec![(Btn::A, tr("choose")), (Btn::B, tr("close"))];
+        }
+        if self.mods.over.is_some() {
+            return self.modview_hints(crate::ui::modules::Which::Over);
         }
         if self.sgdb.ask.is_some() {
             return vec![
@@ -870,6 +939,9 @@ impl App {
                     (Btn::A, tr("art_take_btn")),
                     (Btn::B, tr("back")),
                 ];
+            }
+            if v.focus == crate::ui::game_page::INSIDE && matches!(v.tab, Tab::Module(_)) {
+                return self.modview_hints(crate::ui::modules::Which::Game);
             }
             if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Compat {
                 return vec![
@@ -932,6 +1004,8 @@ impl App {
             Page::Settings => vec![(Btn::Dpad, tr("change")), (Btn::B, tr("back"))],
             Page::About => vec![],
             Page::Proton => vec![(Btn::A, tr("pu_act")), (Btn::Dpad, tr("scroll"))],
+            Page::Module(_) => self.modview_hints(crate::ui::modules::Which::Page),
+            Page::Modules => self.modules_hints(),
             Page::Sounds => {
                 let mut v = vec![(Btn::A, tr("sounds_use_btn")), (Btn::LT, tr("sounds_tab"))];
                 if self.sounds.tab == 0 {
@@ -1153,6 +1227,8 @@ impl eframe::App for App {
                         Page::About => self.draw_about(ui, body),
                         Page::Proton => self.draw_proton(ui, body),
                         Page::Sounds => self.draw_sounds(ui, body),
+                        Page::Module(i) => self.draw_mod_section(ui, body, i),
+                        Page::Modules => self.draw_modules(ui, body),
                     }
                 }
                 let hints =
@@ -1189,6 +1265,9 @@ impl eframe::App for App {
                     self.draw_sgdb_ask(ui, full);
                 }
 
+                if self.mods.over.is_some() {
+                    self.draw_mod_over(ui, full);
+                }
                 if self.menu.is_some() {
                     self.draw_menu(ui, full);
                 }
@@ -1203,6 +1282,7 @@ impl eframe::App for App {
                 }
                 self.draw_toast(ui, full);
             });
+        self.mods_tick();
         self.sound_watch(&ctx);
         self.save_later();
         if self.animating() {

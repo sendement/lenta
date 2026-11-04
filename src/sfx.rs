@@ -234,6 +234,11 @@ impl Sfx {
         self.played.replace(false)
     }
 
+    /// Count as played (put back what take_played took).
+    pub fn mark_played(&self) {
+        self.played.set(true);
+    }
+
     pub fn play(&self, s: Sound) {
         self.played.set(true);
         #[cfg(test)]
@@ -272,7 +277,7 @@ fn decode(f: &Path) -> Option<rodio::buffer::SamplesBuffer> {
 const STORE: &str = "https://api.deckthemes.com";
 
 /// A pack in the DeckThemes store.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Listed {
     pub id: String,
     pub name: String,
@@ -280,6 +285,33 @@ pub struct Listed {
     pub downloads: u64,
     pub blob: String,
     pub image: Option<String>,
+}
+
+fn store_file() -> PathBuf {
+    crate::net::cache_dir().join("sounds-store.json")
+}
+
+/// The store's list as it was last fetched, to show at once (pictures are
+/// cached by address, so they come from disk too).
+pub fn store_saved() -> Option<Vec<Listed>> {
+    serde_json::from_slice(&std::fs::read(store_file()).ok()?).ok()
+}
+
+/// Keep the list for next time.
+pub fn store_keep(list: &[Listed]) {
+    if std::env::var_os("LENTA_DRY_RUN").is_some() {
+        return;
+    }
+    let f = store_file();
+    if let Some(d) = f.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    if let Ok(b) = serde_json::to_vec(list) {
+        let tmp = f.with_extension("json.part");
+        if std::fs::write(&tmp, b).is_ok() {
+            let _ = std::fs::rename(&tmp, &f);
+        }
+    }
 }
 
 /// Every sound pack in the store, most downloaded first (page by page).

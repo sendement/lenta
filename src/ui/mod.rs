@@ -8,6 +8,7 @@ pub mod grid;
 pub mod home;
 pub mod library;
 pub mod menu;
+pub mod modules;
 pub mod osk;
 pub mod proton;
 pub mod ribbon;

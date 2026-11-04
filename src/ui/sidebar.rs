@@ -16,6 +16,7 @@ fn icon_of(p: Page) -> Icon {
         Page::System => Icon::System,
         Page::Proton => Icon::Proton,
         Page::Sounds => Icon::Sound,
+        Page::Module(_) | Page::Modules => Icon::Module,
         Page::Settings => Icon::Settings,
         Page::About => Icon::About,
     }
@@ -84,7 +85,8 @@ impl App {
         }
         let row_h = 58.0;
         let top = rect.top() + 100.0;
-        for (i, page) in Page::ALL.iter().enumerate() {
+        let pages = self.pages();
+        for (i, page) in pages.iter().enumerate() {
             // About sits at the bottom.
             let y = if *page == Page::About {
                 rect.bottom() - bottom - row_h - 16.0
@@ -118,13 +120,25 @@ impl App {
                 Color32::from_gray(170)
             };
             let ic = pos2(rect.left() + COLLAPSED / 2.0, r.center().y);
-            widgets::icon(&p, ic, 26.0, icon_of(*page), color);
+            match page {
+                Page::Module(m) => self.mod_icon(&p, ic, 26.0, *m as usize, color),
+                _ => widgets::icon(&p, ic, 26.0, icon_of(*page), color),
+            }
             if t > 0.3 {
                 let alpha = ((t - 0.3) / 0.7).clamp(0.0, 1.0);
+                let name = match page {
+                    Page::Module(m) => self
+                        .mods
+                        .list
+                        .get(*m as usize)
+                        .map(|m| m.name.clone())
+                        .unwrap_or_default(),
+                    _ => tr(page.key()).to_string(),
+                };
                 p.text(
                     pos2(rect.left() + COLLAPSED - 2.0, r.center().y),
                     Align2::LEFT_CENTER,
-                    tr(page.key()),
+                    name,
                     FontId::proportional(19.0),
                     color.gamma_multiply(alpha),
                 );
