@@ -45,6 +45,14 @@ pub enum S {
     Rescan,
     Account,
     Uninstalled,
+    Sgdb,
+    ThemeMusic,
+    ThemeMusicRibbon,
+    MusicVolume,
+    UiSounds,
+    SoundPack,
+    SoundVolume,
+    SoundStore,
 }
 
 enum Row {
@@ -83,6 +91,14 @@ const ROWS: &[Row] = &[
     Row::Item(S::Fullscreen),
     Row::Item(S::Pinned),
     Row::Item(S::Speed),
+    Row::Item(S::ThemeMusic),
+    Row::Item(S::ThemeMusicRibbon),
+    Row::Item(S::MusicVolume),
+    Row::Head("s_sounds"),
+    Row::Item(S::UiSounds),
+    Row::Item(S::SoundPack),
+    Row::Item(S::SoundVolume),
+    Row::Item(S::SoundStore),
     Row::Head("s_sources"),
     Row::Item(S::Steam),
     Row::Item(S::Heroic),
@@ -91,6 +107,8 @@ const ROWS: &[Row] = &[
     Row::Head("s_account"),
     Row::Item(S::Account),
     Row::Item(S::Uninstalled),
+    Row::Head("s_sgdb"),
+    Row::Item(S::Sgdb),
 ];
 
 fn items() -> Vec<S> {
@@ -119,6 +137,7 @@ fn kind(s: S) -> Kind {
         S::Glow => sl(0.0, 2.0, 0.1),
         S::BgDim => sl(0.0, 0.9, 0.05),
         S::Speed => sl(0.3, 2.5, 0.1),
+        S::MusicVolume | S::SoundVolume => sl(0.05, 1.0, 0.05),
         S::Fullscreen
         | S::Pinned
         | S::Reflection
@@ -128,9 +147,12 @@ fn kind(s: S) -> Kind {
         | S::Steam
         | S::Heroic
         | S::Lutris
-        | S::Uninstalled => Kind::Toggle,
+        | S::Uninstalled
+        | S::ThemeMusic
+        | S::ThemeMusicRibbon
+        | S::UiSounds => Kind::Toggle,
         S::Color1 | S::Color2 => Kind::Color,
-        S::Rescan | S::Account => Kind::Button,
+        S::Rescan | S::Account | S::Sgdb | S::SoundStore => Kind::Button,
         _ => Kind::Choice,
     }
 }
@@ -168,6 +190,14 @@ fn label(s: S) -> &'static str {
         S::Rescan => "rescan",
         S::Account => "account",
         S::Uninstalled => "show_uninstalled",
+        S::Sgdb => "sgdb_key",
+        S::ThemeMusic => "theme_music",
+        S::ThemeMusicRibbon => "theme_music_ribbon",
+        S::UiSounds => "ui_sounds",
+        S::SoundPack => "sound_pack",
+        S::SoundVolume => "sound_volume",
+        S::SoundStore => "sound_store",
+        S::MusicVolume => "music_volume",
     })
 }
 
@@ -182,6 +212,8 @@ fn slider_ref(c: &mut Config, s: S) -> Option<&mut f32> {
         S::Glow => &mut c.glow,
         S::BgDim => &mut c.bg_dim,
         S::Speed => &mut c.speed,
+        S::MusicVolume => &mut c.music_volume,
+        S::SoundVolume => &mut c.sound_volume,
         _ => return None,
     })
 }
@@ -198,6 +230,9 @@ fn toggle_ref(c: &mut Config, s: S) -> Option<&mut bool> {
         S::Heroic => &mut c.heroic,
         S::Lutris => &mut c.lutris,
         S::Uninstalled => &mut c.show_uninstalled,
+        S::ThemeMusic => &mut c.theme_music,
+        S::ThemeMusicRibbon => &mut c.theme_music_ribbon,
+        S::UiSounds => &mut c.ui_sounds,
         _ => return None,
     })
 }
@@ -230,6 +265,13 @@ fn choice_step(c: &mut Config, s: S, d: i32) {
         S::Sort => c.sort = cycle(&[Sort::Recent, Sort::Name, Sort::Playtime], c.sort, d),
         S::Shape => c.shape = cycle(&[Shape::Portrait, Shape::Landscape], c.shape, d),
         S::TiltMode => c.tilt_mode = cycle(&[TiltMode::Flow, TiltMode::Fan], c.tilt_mode, d),
+        S::SoundPack => {
+            // Steam's own, then the installed packs.
+            let mut names = vec![String::new()];
+            names.extend(crate::sfx::packs().into_iter().map(|p| p.name));
+            let i = names.iter().position(|n| *n == c.sound_pack).unwrap_or(0) as i32;
+            c.sound_pack = names[(i + d).rem_euclid(names.len() as i32) as usize].clone();
+        }
         S::AccentMode => {
             c.accent_mode = cycle(
                 &[
@@ -295,7 +337,7 @@ fn slider_text(s: S, v: f32) -> String {
         S::Size | S::Spacing | S::Rounding => format!("{v:.0}"),
         S::SelScale | S::Speed => format!("×{v:.2}"),
         S::Tilt => format!("{v:.0}°"),
-        S::Dim | S::BgDim => {
+        S::Dim | S::BgDim | S::MusicVolume | S::SoundVolume => {
             if v <= 0.001 {
                 tr("off").to_string()
             } else {
@@ -341,23 +383,48 @@ fn relevant(c: &Config, s: S) -> bool {
         S::TiltMode => c.tilt > 0.0,
         S::BgDim => c.bg_hero,
         S::Account | S::Uninstalled => c.steam,
+        S::MusicVolume | S::ThemeMusicRibbon => c.theme_music,
+        S::SoundPack | S::SoundVolume => c.ui_sounds,
         _ => true,
     }
 }
 
 impl App {
     fn adjust(&mut self, s: S, d: i32) {
+        use crate::sfx::Sound;
         match kind(s) {
             Kind::Slider { min, max, step } => {
                 if let Some(v) = slider_ref(&mut self.cfg, s) {
                     *v = ((*v + step * d as f32) / step).round() * step;
                     *v = v.clamp(min, max);
                 }
+                self.sfx.play(if d > 0 {
+                    Sound::SliderUp
+                } else {
+                    Sound::SliderDown
+                });
             }
-            Kind::Choice => choice_step(&mut self.cfg, s, d),
+            Kind::Choice => {
+                choice_step(&mut self.cfg, s, d);
+                self.sfx.play(Sound::Navigate);
+            }
             Kind::Toggle => {
                 if let Some(v) = toggle_ref(&mut self.cfg, s) {
                     *v = !*v;
+                    let on = *v;
+                    // Turning the sounds on gives no sound yet: set first.
+                    if s == S::UiSounds {
+                        self.sfx.set(
+                            self.cfg.ui_sounds,
+                            &self.cfg.sound_pack,
+                            self.cfg.sound_volume,
+                        );
+                    }
+                    self.sfx.play(if on {
+                        Sound::ToggleOn
+                    } else {
+                        Sound::ToggleOff
+                    });
                 }
             }
             Kind::Color => {
@@ -398,9 +465,16 @@ impl App {
                 }
             }
             Kind::Button => match s {
-                S::Rescan => self.rescan(),
+                S::Rescan => {
+                    self.sfx.play(crate::sfx::Sound::Activate);
+                    self.rescan()
+                }
                 S::Account if self.steam.account.is_some() => self.sign_out(),
                 S::Account => self.start_login(),
+                S::Sgdb if self.sgdb.job.is_some() => {}
+                S::Sgdb if self.sgdb.has_key() => self.sgdb_disconnect(),
+                S::Sgdb => self.sgdb_connect(None),
+                S::SoundStore => self.go(crate::app::Page::Sounds),
                 _ => {}
             },
             Kind::Slider { .. } => {}
@@ -631,7 +705,17 @@ impl App {
             if let Kind::Slider { min, max, step } = kind(s)
                 && let Some(v) = slider_ref(&mut self.cfg, s)
             {
+                let old = *v;
                 *v = ((min + (max - min) * t) / step).round() * step;
+                // A tick per step the knob passes, as with the pad.
+                if (*v - old).abs() > step * 0.5 {
+                    let up = *v > old;
+                    self.sfx.play(if up {
+                        crate::sfx::Sound::SliderUp
+                    } else {
+                        crate::sfx::Sound::SliderDown
+                    });
+                }
             }
         }
         self.draw_preview(
@@ -667,7 +751,15 @@ impl App {
                 );
             }
             Kind::Choice => {
-                let text = choice_text(&self.cfg, s);
+                let text = if s == S::SoundPack {
+                    if self.cfg.sound_pack.is_empty() {
+                        tr("sounds_steam").to_string()
+                    } else {
+                        self.cfg.sound_pack.clone()
+                    }
+                } else {
+                    choice_text(&self.cfg, s).to_string()
+                };
                 p.text(vr.center(), Align2::CENTER_CENTER, text, font.clone(), tc);
                 let a = Color32::from_gray(if focused { 230 } else { 110 });
                 p.text(
@@ -756,9 +848,22 @@ impl App {
                         Some(_) => tr("sign_out").to_string(),
                         None => tr("sign_in").to_string(),
                     },
+                    S::Sgdb if self.sgdb.job.is_some() => "…".to_string(),
+                    S::Sgdb if self.sgdb.has_key == Some(true) => tr("sgdb_disconnect").to_string(),
+                    S::Sgdb => tr("sgdb_connect").to_string(),
+                    S::SoundStore => tr("open").to_string(),
                     _ if self.scanning => "…".to_string(),
                     _ => "↻".to_string(),
                 };
+                if s == S::Sgdb && self.sgdb.has_key == Some(true) {
+                    p.text(
+                        pos2(vr.right() - 156.0, vr.center().y),
+                        Align2::RIGHT_CENTER,
+                        tr("sgdb_connected"),
+                        font.clone(),
+                        tc,
+                    );
+                }
                 // Who is signed in, beside the button.
                 if s == S::Account
                     && let Some(a) = &self.steam.account
@@ -788,7 +893,11 @@ impl App {
                     r.center(),
                     Align2::CENTER_CENTER,
                     text,
-                    FontId::proportional(if s == S::Account { 16.0 } else { 20.0 }),
+                    FontId::proportional(if matches!(s, S::Account | S::Sgdb) {
+                        16.0
+                    } else {
+                        20.0
+                    }),
                     Color32::WHITE,
                 );
             }

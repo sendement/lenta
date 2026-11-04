@@ -114,6 +114,15 @@ pub struct Tool {
     pub display: String,
     /// Steam's own (fetched on demand) rather than one put in by hand.
     pub official: bool,
+    /// Steam's app id for an official one (installed and removed by Steam).
+    pub appid: Option<u32>,
+    /// On disk: an official one Steam has installed, or any other.
+    pub installed: bool,
+    /// Its folder (custom and system ones).
+    pub dir: Option<PathBuf>,
+    /// In the user's own compatibilitytools.d (system ones belong to
+    /// packages).
+    pub removable: bool,
 }
 
 /// The tools that run Windows games: Steam's Protons (newest first) and
@@ -129,14 +138,20 @@ pub fn tools() -> Vec<Tool> {
         .get(&891390)
         .and_then(|kv| kv.path(&["appinfo", "extended", "compat_tools"]))
     {
+        let installed_apps: HashSet<u32> = super::steam::installed_app_ids(&root);
         for (name, t) in list.entries() {
             if t.get_str("from_oslist") != Some("windows") {
                 continue;
             }
+            let appid = t.get_int("appid").map(|a| a as u32);
             out.push(Tool {
                 name: name.clone(),
                 display: t.get_str("display_name").unwrap_or(name).to_string(),
                 official: true,
+                installed: appid.is_some_and(|a| installed_apps.contains(&a)),
+                appid,
+                dir: None,
+                removable: false,
             });
         }
     }
@@ -147,6 +162,7 @@ pub fn tools() -> Vec<Tool> {
     dirs.push("/usr/share/steam/compatibilitytools.d".into());
     dirs.push("/usr/local/share/steam/compatibilitytools.d".into());
     let mut custom: Vec<Tool> = Vec::new();
+    let own = root.join("compatibilitytools.d").canonicalize().ok();
     for d in dirs {
         let Ok(rd) = std::fs::read_dir(&d) else {
             continue;
@@ -171,10 +187,23 @@ pub fn tools() -> Vec<Tool> {
                 if custom.iter().any(|c| c.name == *name) {
                     continue;
                 }
+                let dir = if e.path().is_dir() {
+                    Some(e.path())
+                } else {
+                    None
+                };
+                let removable = dir
+                    .as_ref()
+                    .and_then(|d| d.canonicalize().ok())
+                    .is_some_and(|d| d.parent().map(Path::to_path_buf) == own);
                 custom.push(Tool {
                     name: name.clone(),
                     display: t.get_str("display_name").unwrap_or(name).to_string(),
                     official: false,
+                    appid: None,
+                    installed: true,
+                    dir,
+                    removable,
                 });
             }
         }

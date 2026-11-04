@@ -73,6 +73,7 @@ pub enum Btn {
     A,
     B,
     X,
+    Y,
     LB,
     LT,
     View,
@@ -91,6 +92,7 @@ fn key_name(b: Btn) -> &'static str {
         Btn::A => "Enter",
         Btn::B => "Esc",
         Btn::X => "Space",
+        Btn::Y => "F",
         Btn::LB => "Q / E",
         Btn::LT => "PgUp / PgDn",
         Btn::View => "Tab",
@@ -130,7 +132,7 @@ pub fn glyph(p: &Painter, left: Pos2, h: f32, b: Btn, g: Glyphs) -> f32 {
     match g {
         Glyphs::Keys => pill(key_name(b), p),
         Glyphs::Pad(kind) => match b {
-            Btn::A | Btn::B | Btn::X => {
+            Btn::A | Btn::B | Btn::X | Btn::Y => {
                 match kind {
                     PadKind::Xbox => {
                         let (fill, l) = match b {
@@ -269,7 +271,7 @@ fn glyph_width(p: &Painter, h: f32, b: Btn, g: Glyphs) -> f32 {
     let label = match g {
         Glyphs::Keys => key_name(b),
         Glyphs::Pad(kind) => match b {
-            Btn::A | Btn::B | Btn::X | Btn::Dpad => return h,
+            Btn::A | Btn::B | Btn::X | Btn::Y | Btn::Dpad => return h,
             Btn::View | Btn::Menu => return h * 1.3,
             Btn::LB => {
                 if kind == PadKind::PlayStation {
@@ -304,6 +306,8 @@ pub enum Icon {
     System,
     Settings,
     About,
+    Proton,
+    Sound,
     Play,
     Clock,
     Trophy,
@@ -364,6 +368,51 @@ pub fn icon(p: &Painter, c: Pos2, s: f32, icon: Icon, color: Color32) {
             p.circle_stroke(c, h * 0.9, st);
             p.circle_filled(c + vec2(0.0, -h * 0.4), s * 0.06, color);
             p.line_segment([c + vec2(0.0, -h * 0.1), c + vec2(0.0, h * 0.5)], st);
+        }
+        Icon::Sound => {
+            // A speaker and two waves.
+            let body = vec![
+                c + vec2(-h * 0.85, -h * 0.3),
+                c + vec2(-h * 0.45, -h * 0.3),
+                c + vec2(0.0, -h * 0.75),
+                c + vec2(0.0, h * 0.75),
+                c + vec2(-h * 0.45, h * 0.3),
+                c + vec2(-h * 0.85, h * 0.3),
+            ];
+            p.add(Shape::closed_line(body, st));
+            for r in [h * 0.45, h * 0.85] {
+                let arc: Vec<Pos2> = (0..=8)
+                    .map(|k| {
+                        let a = -0.8 + 1.6 * k as f32 / 8.0;
+                        c + vec2(h * 0.1 + r * a.cos(), r * a.sin())
+                    })
+                    .collect();
+                p.add(Shape::line(arc, st));
+            }
+        }
+        Icon::Proton => {
+            // A flask.
+            let neck = h * 0.32;
+            let pts = vec![
+                c + vec2(-neck, -h * 0.9),
+                c + vec2(-neck, -h * 0.25),
+                c + vec2(-h * 0.85, h * 0.75),
+                c + vec2(h * 0.85, h * 0.75),
+                c + vec2(neck, -h * 0.25),
+                c + vec2(neck, -h * 0.9),
+            ];
+            p.add(Shape::line(pts, st));
+            p.line_segment(
+                [
+                    c + vec2(-neck * 1.4, -h * 0.9),
+                    c + vec2(neck * 1.4, -h * 0.9),
+                ],
+                st,
+            );
+            p.line_segment(
+                [c + vec2(-h * 0.5, h * 0.25), c + vec2(h * 0.5, h * 0.25)],
+                st,
+            );
         }
         Icon::Play => {
             let pts = vec![

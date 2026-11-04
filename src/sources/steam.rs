@@ -390,6 +390,87 @@ pub fn games() -> Vec<Game> {
     out
 }
 
+/// Installed soundtracks (Steam keeps them in steamapps/music); opening
+/// one shows its folder.
+pub fn soundtracks() -> Vec<Game> {
+    let mut out = Vec::new();
+    for root in roots() {
+        let mut found = Vec::new();
+        for lib in libraries(&root) {
+            let Ok(rd) = std::fs::read_dir(lib.join("steamapps")) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if !(n.starts_with("appmanifest_") && n.ends_with(".acf")) {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(e.path()) else {
+                    continue;
+                };
+                let kv = vdf::parse_text(&text);
+                let Some(st) = kv.get("AppState") else {
+                    continue;
+                };
+                let (Some(id), Some(dir)) = (st.get_int("appid"), st.get_str("installdir")) else {
+                    continue;
+                };
+                let path = lib.join("steamapps/music").join(dir);
+                if path.is_dir() {
+                    found.push((
+                        id as u32,
+                        st.get_str("name").unwrap_or(dir).to_string(),
+                        path,
+                    ));
+                }
+            }
+        }
+        let users = users(&root);
+        for (id, name, path) in found {
+            let p = path.display().to_string();
+            out.push(Game {
+                key: format!("steam-ost:{id}"),
+                title: name,
+                source: Source::Steam,
+                sub: Some(crate::i18n::tr("soundtrack").to_string()),
+                art: steam_art(&root, &users, id),
+                playtime_min: None,
+                last_played: None,
+                steam_appid: None,
+                store_appid: Some(id),
+                installed: true,
+                compat_id: None,
+                emu: None,
+                prefix: None,
+                install_dir: Some(path),
+                launch: vec![vec!["xdg-open".into(), p]],
+            });
+        }
+    }
+    out
+}
+
+/// Apps with a fully installed appmanifest in any library.
+pub fn installed_app_ids(root: &Path) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    for lib in libraries(root) {
+        let Ok(rd) = std::fs::read_dir(lib.join("steamapps")) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if let Some(id) = n
+                .strip_prefix("appmanifest_")
+                .and_then(|s| s.strip_suffix(".acf"))
+                .and_then(|s| s.parse().ok())
+            {
+                out.insert(id);
+            }
+        }
+    }
+    out
+}
+
 /// Owned games that aren't installed (from the account's list): Play
 /// asks Steam to install them.
 pub fn uninstalled(owned: &[crate::account::Owned]) -> Vec<Game> {

@@ -4,7 +4,7 @@
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::card::{self, Pose};
-use super::widgets::{self, Icon};
+use super::widgets::{self, Btn, Icon};
 use crate::app::{App, Tab};
 use crate::game::{Game, date};
 use crate::i18n::{self, tr};
@@ -16,6 +16,8 @@ use crate::store::State;
 /// Focus inside the tab's content (the screenshots, the tool list).
 pub const INSIDE: usize = 9;
 const SHOT_COLS: usize = 3;
+/// Clear shader caches, reset the prefix: under the tools.
+const MAINT_ROWS: usize = 2;
 
 impl App {
     fn page_game(&self) -> Option<Game> {
@@ -44,16 +46,81 @@ impl App {
         if self.can_downgrade(g) {
             v.push(Tab::Versions);
         }
+        if self.sgdb.has_key == Some(true) {
+            v.push(Tab::Art);
+        }
         v
     }
 
     /// Rows in the compatibility tab: the tools, then "Restart Steam"
     /// while changes wait.
     fn tool_rows(&self) -> usize {
-        self.tool_choices().len() + usize::from(!self.steam.pending.is_empty())
+        self.tool_choices().len() + usize::from(!self.steam.pending.is_empty()) + MAINT_ROWS
+    }
+
+    /// Ask, then clear the game's shader caches.
+    pub fn clear_shaders(&mut self, g: &Game) {
+        let items = crate::maint::shader_caches(g);
+        let total: u64 = items.iter().map(|i| i.size).sum();
+        if items.is_empty() || total == 0 {
+            self.toast(tr("maint_no_cache"));
+            return;
+        }
+        let lines = vec![
+            format!(
+                "{} ({} {})",
+                crate::maint::human(total),
+                items.len(),
+                tr("maint_places")
+            ),
+            tr("maint_shaders_note").to_string(),
+        ];
+        self.ask(
+            format!("{} — {}?", tr("maint_shaders"), g.title),
+            lines,
+            tr("maint_clear"),
+            move |app| {
+                let freed = crate::maint::clear(&items);
+                app.toast(format!(
+                    "{}: {}",
+                    tr("maint_freed"),
+                    crate::maint::human(freed)
+                ));
+            },
+        );
+    }
+
+    /// Ask, then move the game's prefix to the trash.
+    pub fn reset_prefix(&mut self, g: &Game) {
+        let Some(pfx) = crate::maint::prefix(g) else {
+            self.toast(tr("maint_no_prefix"));
+            return;
+        };
+        let lines = vec![
+            format!(
+                "{} ({})",
+                pfx.display(),
+                crate::maint::human(crate::maint::size(&pfx))
+            ),
+            tr("maint_prefix_trash").to_string(),
+            tr("maint_prefix_new").to_string(),
+            tr("maint_prefix_saves").to_string(),
+        ];
+        self.ask(
+            format!("{} — {}?", tr("maint_prefix"), g.title),
+            lines,
+            tr("maint_reset"),
+            move |app| match crate::maint::trash(&pfx) {
+                Ok(_) => app.toast(tr("maint_prefix_done")),
+                Err(e) => app.toast(format!("{}: {e}", tr("sd_failed"))),
+            },
+        );
     }
 
     pub fn game_input(&mut self, a: Action) {
+        if let Some(v) = self.game.as_mut() {
+            v.follow = true;
+        }
         // A question about a version is up: A yes, B no.
         if self.versions.ask.is_some() {
             match a {
@@ -75,6 +142,11 @@ impl App {
             .and_then(|cur| choices.iter().position(|c| c.0 == cur))
             .unwrap_or(0);
         let ver_rows = self.versions.row_count();
+        let art_rows = self.art_rows();
+        let ach_rows = match self.store.achievements(&g) {
+            State::Ready(l) => l.len(),
+            _ => 0,
+        };
         let ver_start = self.versions.start_row();
         let Some(v) = self.game.as_mut() else { return };
         // A screenshot shown big.
@@ -92,6 +164,43 @@ impl App {
         }
         let tab_i = tabs.iter().position(|t| *t == v.tab).unwrap_or(0);
         let inside = v.focus == INSIDE;
+        // Achievements: chosen one by one; A shows a hidden one.
+        if inside && v.tab == Tab::Achievements {
+            match a {
+                Action::Up if v.tool_sel == 0 => v.focus = tab_i + 1,
+                Action::Up => v.tool_sel -= 1,
+                Action::Down => v.tool_sel = (v.tool_sel + 1).min(ach_rows.saturating_sub(1)),
+                Action::Back => v.focus = tab_i + 1,
+                Action::Accept => v.reveal = true,
+                _ => {}
+            }
+            return;
+        }
+        // The pictures: a row per kind, ← → through it, A takes.
+        if inside && v.tab == Tab::Art {
+            let row = v.tool_sel.min(art_rows.saturating_sub(1));
+            match a {
+                Action::Back => v.focus = tab_i + 1,
+                Action::Accept => self.art_take(row),
+                Action::Up | Action::Down | Action::Left | Action::Right => {
+                    // Through the grid; past the top: back to the tabs.
+                    match self.art_nav(row, a) {
+                        Some(r) => {
+                            if let Some(v) = self.game.as_mut() {
+                                v.tool_sel = r;
+                            }
+                        }
+                        None => {
+                            if let Some(v) = self.game.as_mut() {
+                                v.focus = tab_i + 1;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         // The versions list.
         if inside && v.tab == Tab::Versions {
             match a {
@@ -118,12 +227,17 @@ impl App {
                 Action::Back => v.focus = tab_i + 1,
                 Action::Accept => {
                     let sel = v.tool_sel;
+                    let restart_row = usize::from(!self.steam.pending.is_empty());
                     if sel < choices.len() {
                         if let Some(id) = g.compat_id {
                             self.choose_tool(id, choices[sel].0.clone());
                         }
-                    } else {
+                    } else if sel < choices.len() + restart_row {
                         self.restart_steam();
+                    } else if sel == choices.len() + restart_row {
+                        self.clear_shaders(&g);
+                    } else {
+                        self.reset_prefix(&g);
                     }
                 }
                 _ => {}
@@ -142,6 +256,8 @@ impl App {
                 let k = v.key.clone();
                 self.play(&k);
             }
+            // Y: another theme song.
+            Action::Actions if self.cfg.theme_music => self.music.next(),
             Action::LeftTrigger | Action::RightTrigger => {
                 let n = tabs.len();
                 let j = if a == Action::RightTrigger {
@@ -172,7 +288,12 @@ impl App {
             Action::Accept if inside => v.shot = Some(v.shot_sel),
             Action::Left => v.focus = v.focus.saturating_sub(1),
             Action::Right => v.focus = (v.focus + 1).min(tabs.len()),
-            Action::Up => v.scroll = (v.scroll - 160.0).max(0.0),
+            Action::Up => {
+                if v.scroll <= 0.5 {
+                    v.folded = false;
+                }
+                v.scroll = (v.scroll - 160.0).max(0.0);
+            }
             Action::Down => match v.tab {
                 Tab::Screenshots if shots > 0 => v.focus = INSIDE,
                 Tab::Compat => {
@@ -183,7 +304,18 @@ impl App {
                     v.focus = INSIDE;
                     v.tool_sel = ver_start;
                 }
-                _ => v.scroll = (v.scroll + 160.0).min(v.max_scroll),
+                Tab::Art if art_rows > 0 => {
+                    v.focus = INSIDE;
+                    v.tool_sel = 0;
+                }
+                Tab::Achievements if ach_rows > 0 => {
+                    v.focus = INSIDE;
+                    v.tool_sel = 0;
+                }
+                _ => {
+                    v.folded |= v.overflow;
+                    v.scroll = (v.scroll + 160.0).min(v.max_scroll);
+                }
             },
             Action::Accept => {
                 if v.focus == 0 {
@@ -197,6 +329,11 @@ impl App {
                 } else if v.tab == Tab::Versions && ver_rows > 0 {
                     v.focus = INSIDE;
                     v.tool_sel = ver_start;
+                } else if (v.tab == Tab::Achievements && ach_rows > 0)
+                    || (v.tab == Tab::Art && art_rows > 0)
+                {
+                    v.focus = INSIDE;
+                    v.tool_sel = 0;
                 }
             }
             _ => {}
@@ -207,6 +344,7 @@ impl App {
         {
             v.tab = tabs[v.focus - 1];
             v.scroll = 0.0;
+            v.folded = false;
         }
     }
 
@@ -227,7 +365,21 @@ impl App {
         if age < 0.4 {
             ui.ctx().request_repaint();
         }
-        let head_bottom = rect.top() + rect.height() * 0.40 + rise;
+        // Inside a tab (or scrolled) the header slides away and Play with
+        // the tabs rises to the top, giving the content the page.
+        let (inside, scrolled) = self
+            .game
+            .as_ref()
+            .map(|v| (v.focus == INSIDE, v.folded))
+            .unwrap_or((false, false));
+        let collapse = ui.ctx().animate_value_with_time(
+            ui.id().with("game_collapse"),
+            if inside || scrolled { 1.0 } else { 0.0 },
+            0.28,
+        );
+        let full_head = rect.height() * 0.40 + rise;
+        let lift = collapse * (full_head + 28.0 - 16.0);
+        let head_bottom = rect.top() + full_head - lift;
         // Cover on the left of the header.
         let mut x = rect.left() + pad;
         let cover_h = (rect.height() * 0.30).min(300.0);
@@ -314,6 +466,70 @@ impl App {
             meta.clone(),
             Color32::from_gray(190),
         );
+        // The theme playing, and "another track".
+        let now = self.music.now.lock().ok().and_then(|n| n.clone());
+        if self.cfg.theme_music
+            && let Some((key, song)) = now.filter(|(k, _)| *k == g.key)
+        {
+            let _ = key;
+            let ny = chip.bottom() + 22.0;
+            let nc = pos2(x + 8.0, ny);
+            // A little note.
+            p.circle_filled(nc + vec2(-2.0, 5.0), 4.0, Color32::from_gray(210));
+            p.line_segment(
+                [nc + vec2(1.6, 5.0), nc + vec2(1.6, -7.0)],
+                Stroke::new(1.8, Color32::from_gray(210)),
+            );
+            p.line_segment(
+                [nc + vec2(1.6, -7.0), nc + vec2(7.0, -4.0)],
+                Stroke::new(1.8, Color32::from_gray(210)),
+            );
+            let text = if song.is_empty() {
+                tr("music_looking").to_string()
+            } else {
+                song
+            };
+            let mut job = egui::text::LayoutJob::simple_singleline(
+                text,
+                FontId::proportional(15.0),
+                Color32::from_gray(200),
+            );
+            job.wrap.max_width = 520.0;
+            job.wrap.max_rows = 1;
+            let tg = p.fonts_mut(|f| f.layout_job(job));
+            let tw = tg.size().x;
+            p.galley(pos2(x + 22.0, ny - tg.size().y / 2.0), tg, Color32::WHITE);
+            let label = p.layout_no_wrap(
+                tr("music_next").to_string(),
+                FontId::proportional(14.0),
+                Color32::WHITE,
+            );
+            let br = Rect::from_min_size(
+                pos2(x + 22.0 + tw + 14.0, ny - 13.0),
+                vec2(label.size().x + 50.0, 26.0),
+            );
+            let resp = ui.interact(br, ui.id().with("music_next"), Sense::click());
+            p.rect_filled(
+                br,
+                13.0,
+                Color32::from_white_alpha(if resp.hovered() { 40 } else { 22 }),
+            );
+            widgets::glyph(
+                &p,
+                br.left_top() + vec2(6.0, 4.0),
+                18.0,
+                Btn::Y,
+                self.glyphs,
+            );
+            p.galley(
+                br.left_top() + vec2(30.0, 13.0 - label.size().y / 2.0),
+                label,
+                Color32::WHITE,
+            );
+            if resp.clicked() {
+                self.music.next();
+            }
+        }
 
         // Buttons: Play and the tabs.
         let ach = match self.store.achievements(&g) {
@@ -365,6 +581,7 @@ impl App {
             let label = match t {
                 Tab::Compat => tr("compat").to_string(),
                 Tab::Versions => tr("versions").to_string(),
+                Tab::Art => tr("art_tab").to_string(),
                 Tab::Overview => tr("overview").to_string(),
                 Tab::Achievements => match ach {
                     Some((a, b)) => format!("{} {a}/{b}", tr("achievements")),
@@ -406,6 +623,7 @@ impl App {
                 v.tab = *t;
                 v.focus = i + 1;
                 v.scroll = 0.0;
+                v.folded = false;
             }
             tx = r.right() + 12.0;
         }
@@ -418,6 +636,13 @@ impl App {
         if ui.rect_contains_pointer(body) {
             let d = ui.input(|i| i.smooth_scroll_delta.y);
             if let Some(v) = self.game.as_mut() {
+                // Down folds the header (when there's more below); up at
+                // the very top opens it again.
+                if d < 0.0 && v.overflow {
+                    v.folded = true;
+                } else if d > 0.0 && v.scroll <= 0.5 {
+                    v.folded = false;
+                }
                 v.scroll = (v.scroll - d).clamp(0.0, v.max_scroll);
             }
         }
@@ -444,9 +669,24 @@ impl App {
                     .unwrap_or((false, 0));
                 self.draw_versions(ui, body, &g, eased, focus, sel)
             }
+            Tab::Art => {
+                let (focus, sel) = self
+                    .game
+                    .as_ref()
+                    .map(|v| (v.focus == INSIDE, v.tool_sel))
+                    .unwrap_or((false, 0));
+                self.draw_art(ui, body, &g, eased, focus, sel)
+            }
         };
         if let Some(v) = self.game.as_mut() {
-            v.max_scroll = (content_h - body.height() + 24.0).max(0.0);
+            v.follow = false;
+            // Measured against the page with the header folded (what it
+            // is while scrolled): the end doesn't move as it folds.
+            let full_lift = full_head + 28.0 - 16.0;
+            let folded_h = body.height() + (full_lift - lift);
+            v.max_scroll = (content_h - folded_h + 24.0).max(0.0);
+            // Taller than the page would be with the header open.
+            v.overflow = content_h + 24.0 > body.height() - lift;
             v.scroll = v.scroll.min(v.max_scroll);
         }
         self.draw_big_shot(ui, rect.expand2(vec2(0.0, 60.0)), &g);
@@ -647,7 +887,41 @@ impl App {
             ),
         });
         let row_h = 84.0;
-        for a in &sorted {
+        let (inside, sel) = self
+            .game
+            .as_ref()
+            .map(|v| {
+                (
+                    v.focus == INSIDE,
+                    v.tool_sel.min(sorted.len().saturating_sub(1)),
+                )
+            })
+            .unwrap_or((false, 0));
+        let list_top = y + scroll;
+        if inside && let Some(v) = self.game.as_mut() {
+            // A on the chosen one: show or hide it.
+            if std::mem::take(&mut v.reveal)
+                && let Some(a) = sorted.get(sel)
+                && !v.revealed.remove(&a.id)
+            {
+                v.revealed.insert(a.id.clone());
+            }
+            // Keep it in view (after a key, not against the wheel).
+            let top = list_top - body.top() + sel as f32 * row_h;
+            if !v.follow {
+            } else if top < v.scroll {
+                v.scroll = (top - 70.0).max(0.0);
+            } else if top + row_h > v.scroll + body.height() {
+                v.scroll = top + row_h - body.height();
+            }
+        }
+        let revealed = self
+            .game
+            .as_ref()
+            .map(|v| v.revealed.clone())
+            .unwrap_or_default();
+        let mut clicked = None;
+        for (ai, a) in sorted.iter().enumerate() {
             let r = Rect::from_min_size(pos2(body.left(), y), vec2(body.width(), row_h - 10.0));
             y += row_h;
             if r.bottom() < body.top() || r.top() > body.bottom() {
@@ -679,7 +953,17 @@ impl App {
                     widgets::icon(&p, ir.center(), 26.0, Icon::Trophy, Color32::from_gray(150));
                 }
             }
-            let secret = a.hidden && !got;
+            if inside && ai == sel {
+                p.rect_stroke(r, 14.0, Stroke::new(2.5, c1), StrokeKind::Inside);
+            }
+            if ui
+                .interact(r.intersect(body), ui.id().with(("ach", ai)), Sense::click())
+                .clicked()
+            {
+                clicked = Some(ai);
+            }
+            let shown = revealed.contains(&a.id);
+            let secret = a.hidden && !got && !shown;
             let name = if secret {
                 tr("hidden_ach").to_string()
             } else {
@@ -693,6 +977,15 @@ impl App {
                 Color32::from_gray(if got { 255 } else { 170 }),
             );
             p.galley(pos2(tx, r.top() + 12.0), name_g, Color32::WHITE);
+            if secret && inside && ai == sel {
+                p.text(
+                    pos2(tx, r.top() + 40.0),
+                    Align2::LEFT_TOP,
+                    tr("ach_reveal"),
+                    FontId::proportional(14.0),
+                    Color32::from_gray(150),
+                );
+            }
             if !secret && !a.desc.is_empty() {
                 let mut job = egui::text::LayoutJob::simple(
                     a.desc.clone(),
@@ -728,11 +1021,19 @@ impl App {
                 ly += step;
             }
         }
+        if let Some(ai) = clicked
+            && let Some(v) = self.game.as_mut()
+        {
+            v.focus = INSIDE;
+            v.tool_sel = ai;
+            v.reveal = true;
+        }
         y - (body.top() - scroll)
     }
 
     fn draw_shots(&mut self, ui: &mut Ui, body: Rect, g: &Game, scroll: f32) -> f32 {
-        let p = ui.painter_at(body);
+        // Room at the sides for the focus frame.
+        let p = ui.painter_at(body.expand2(vec2(8.0, 0.0)));
         let shots = match g.info_appid().map(|id| self.store.details(id)) {
             Some(State::Ready(d)) => d.shots.clone(),
             Some(State::Loading) => {
@@ -763,11 +1064,13 @@ impl App {
             .map(|v| (v.focus, v.shot_sel))
             .unwrap_or((0, 0));
         let gap = 18.0;
+        let top = 8.0;
         let w = (body.width() - gap * (SHOT_COLS - 1) as f32) / SHOT_COLS as f32;
         let h = w * 9.0 / 16.0;
         // Keep the chosen one in view.
-        if focus == INSIDE {
+        if focus == INSIDE && self.game.as_ref().is_some_and(|v| v.follow) {
             let row_top = (sel / SHOT_COLS) as f32 * (h + gap);
+            let row_top = row_top.max(0.0);
             if let Some(v) = self.game.as_mut() {
                 if row_top < v.scroll {
                     v.scroll = row_top;
@@ -781,7 +1084,7 @@ impl App {
             let r = Rect::from_min_size(
                 pos2(
                     body.left() + (i % SHOT_COLS) as f32 * (w + gap),
-                    body.top() - scroll + (i / SHOT_COLS) as f32 * (h + gap),
+                    body.top() + top - scroll + (i / SHOT_COLS) as f32 * (h + gap),
                 ),
                 vec2(w, h),
             );
@@ -789,14 +1092,26 @@ impl App {
                 continue;
             }
             let resp = ui.interact(r.intersect(body), ui.id().with(("shot", i)), Sense::click());
+            // Rounded, edges smoothed like the cards.
             match self.images.get(thumb, Kind::Fit(640)) {
-                Some(t) => super::home::cover(&p, r, t, Color32::WHITE),
+                Some(t) => card::draw(
+                    &p,
+                    &Pose::flat(r, 12.0),
+                    &card::Fill::Image(t.handle.id(), card::cover_uv(t.size, r.size())),
+                    Color32::WHITE,
+                    None,
+                ),
                 None => {
-                    p.rect_filled(r, 10.0, Color32::from_white_alpha(14));
+                    p.rect_filled(r, 12.0, Color32::from_white_alpha(14));
                 }
             }
             if focus == INSIDE && sel == i {
-                p.rect_stroke(r, 6.0, Stroke::new(3.0, self.accent.0), StrokeKind::Outside);
+                p.rect_stroke(
+                    r,
+                    12.0,
+                    Stroke::new(3.0, self.accent.0),
+                    StrokeKind::Outside,
+                );
             }
             if resp.clicked() {
                 open = Some(i);
@@ -808,7 +1123,7 @@ impl App {
             v.focus = INSIDE;
         }
         let rows = shots.len().div_ceil(SHOT_COLS);
-        rows as f32 * (h + gap)
+        top + rows as f32 * (h + gap)
     }
 
     /// The compatibility tools as a list: the one in use marked, the
@@ -839,12 +1154,18 @@ impl App {
         let w = body.width().min(620.0);
         let mut chosen = None;
         let mut restart = false;
-        let n = choices.len() + usize::from(pending);
+        let mut maint: Option<usize> = None;
+        let maint_at = choices.len() + usize::from(pending);
+        let n = maint_at + MAINT_ROWS;
         for i in 0..n {
+            if i == maint_at {
+                // A little gap before the upkeep rows.
+                y += 14.0;
+            }
             let r = Rect::from_min_size(pos2(body.left(), y), vec2(w, row_h - 8.0));
             y += row_h;
             // Keep the focused row in view.
-            if focus == INSIDE && i == sel {
+            if focus == INSIDE && i == sel && self.game.as_ref().is_some_and(|v| v.follow) {
                 let top = r.top() + scroll - body.top();
                 if let Some(v) = self.game.as_mut() {
                     if r.bottom() > body.bottom() {
@@ -858,8 +1179,9 @@ impl App {
                 continue;
             }
             let resp = ui.interact(r, ui.id().with(("tool", i)), Sense::click());
-            let is_restart = i == choices.len();
-            let on = !is_restart && choices[i].0 == cur;
+            let is_restart = pending && i == choices.len();
+            let is_maint = i >= maint_at;
+            let on = !is_restart && !is_maint && choices[i].0 == cur;
             p.rect_filled(
                 r,
                 12.0,
@@ -874,7 +1196,27 @@ impl App {
             if focus == INSIDE && i == sel {
                 p.rect_stroke(r, 12.0, Stroke::new(2.5, c1), StrokeKind::Inside);
             }
-            if is_restart {
+            if is_maint {
+                let (label, note) = if i == maint_at {
+                    (tr("maint_shaders"), tr("maint_shaders_row"))
+                } else {
+                    (tr("maint_prefix"), tr("maint_prefix_row"))
+                };
+                p.text(
+                    r.left_center() + vec2(48.0, -9.0),
+                    Align2::LEFT_CENTER,
+                    label,
+                    FontId::proportional(17.0),
+                    Color32::WHITE,
+                );
+                p.text(
+                    r.left_center() + vec2(48.0, 12.0),
+                    Align2::LEFT_CENTER,
+                    note,
+                    FontId::proportional(13.0),
+                    Color32::from_gray(150),
+                );
+            } else if is_restart {
                 widgets::gradient_pill(
                     &p,
                     Rect::from_min_size(r.left_center() + vec2(16.0, -9.0), vec2(18.0, 18.0)),
@@ -922,7 +1264,9 @@ impl App {
                 }
             }
             if resp.clicked() {
-                if is_restart {
+                if is_maint {
+                    maint = Some(i - maint_at);
+                } else if is_restart {
                     restart = true;
                 } else {
                     chosen = Some(choices[i].0.clone());
@@ -939,7 +1283,12 @@ impl App {
         if restart {
             self.restart_steam();
         }
-        note_h + 18.0 + n as f32 * row_h
+        match maint {
+            Some(0) => self.clear_shaders(g),
+            Some(_) => self.reset_prefix(g),
+            None => {}
+        }
+        note_h + 18.0 + n as f32 * row_h + 28.0
     }
 
     fn draw_big_shot(&mut self, ui: &mut Ui, area: Rect, g: &Game) {

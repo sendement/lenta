@@ -84,6 +84,16 @@ pub struct Config {
     /// With a Steam account: the owned games that aren't installed, in
     /// the library.
     pub show_uninstalled: bool,
+    /// Play a game's theme music while its page is open.
+    pub theme_music: bool,
+    /// Interface sounds, from Steam's set or a pack.
+    pub ui_sounds: bool,
+    /// The pack's name ("" = Steam's own sounds).
+    pub sound_pack: String,
+    pub sound_volume: f32,
+    /// …and for the card chosen on the ribbon, after a moment.
+    pub theme_music_ribbon: bool,
+    pub music_volume: f32,
 }
 
 impl Default for Config {
@@ -118,6 +128,12 @@ impl Default for Config {
             heroic: true,
             lutris: true,
             show_uninstalled: true,
+            theme_music: false,
+            ui_sounds: true,
+            sound_pack: String::new(),
+            sound_volume: 0.5,
+            theme_music_ribbon: true,
+            music_volume: 0.35,
         }
     }
 }

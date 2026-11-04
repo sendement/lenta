@@ -32,6 +32,8 @@ zip = { version = "9.3.0", default-features = false, features = ["deflate"] }
 tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 regex = "1"
 flate2 = "1"
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "symphonia-aac", "symphonia-isomp4", "symphonia-wav", "symphonia-pcm", "symphonia-mp3", "symphonia-ogg", "symphonia-vorbis", "symphonia-flac"] }
+sha2 = "0.10"
 
 [profile.release]
 lto = "thin"

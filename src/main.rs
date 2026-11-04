@@ -2,6 +2,7 @@
 
 mod account;
 mod app;
+mod colls;
 mod config;
 mod downgrade;
 mod fonts;
@@ -9,7 +10,13 @@ mod game;
 mod i18n;
 mod images;
 mod input;
+mod keyboard;
+mod maint;
+mod music;
 mod net;
+mod protonup;
+mod sfx;
+mod sgdb;
 mod sources;
 mod store;
 mod ui;
@@ -39,6 +46,48 @@ fn main() -> eframe::Result {
         let cfg = config::Config::load();
         i18n::set(cfg.lang);
         return downgrade_cli(cmd, app, rest);
+    }
+    // SteamGridDB's API key through the Steam sign-in: --sgdb [NAME]
+    // (NAME: create the account with it when there is none).
+    if args.get(1).map(String::as_str) == Some("--sgdb") {
+        let Some(acc) = account::Account::load() else {
+            eprintln!("sign in to Steam first");
+            std::process::exit(1)
+        };
+        let run = || -> Result<String, String> {
+            let (mut s, who) = sgdb::Session::sign_in(&acc)?;
+            println!("signed in through Steam: {who:?}");
+            if who == sgdb::Who::NoAccount {
+                let Some(name) = args.get(2) else {
+                    return Err(format!(
+                        "no SteamGridDB account; suggested names: {:?}",
+                        sgdb::name_choices(&acc.name)
+                    ));
+                };
+                s.check_name(name)?;
+                s.register(name)?;
+                println!("account created: {:?}", s.whoami()?);
+            }
+            let key = s.api_key()?;
+            if !sgdb::check_key(&key)? {
+                return Err("the API did not accept the key".into());
+            }
+            sgdb::save_key(&key)?;
+            Ok(format!(
+                "key saved ({}…{}, {} chars)",
+                &key[..4],
+                &key[key.len() - 2..],
+                key.len()
+            ))
+        };
+        match run() {
+            Ok(m) => println!("{m}"),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1)
+            }
+        }
+        return Ok(());
     }
     // For development: why the account's game list does or doesn't load.
     if std::env::args().nth(1).as_deref() == Some("--owned") {

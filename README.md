@@ -11,7 +11,16 @@ A gamepad-first game launcher for Linux, written in Rust with egui.
 - **Game page** — Play, the Steam store description and details (developer,
   publisher, genres, release date, Metacritic), achievements with unlock
   dates, screenshots, play time and last launch.
-- **Library** — every game in a grid, filtered by source.
+- **Library** — a tab per launcher (Steam, Heroic, Lutris) with shelves on
+  the left: all, installed, favourites, collections, third-party,
+  soundtracks. The last tab, **My collections**, holds the launcher's own
+  collections across all launchers: plain ones (games put in by hand) and
+  dynamic ones (every game that fits a rule: launcher, installed,
+  favourite, third-party, played last, time played, words in the name).
+  Drag a game card onto the panel that comes up on the left, or press Y
+  (right click) on a game for its menu and tick a collection. Names are
+  typed on Polka's on-screen keyboard (or a real one). Kept in
+  `~/.local/share/lenta/collections.json`.
 - **System apps** — the system's `.desktop` programs, grouped by category.
 
 ## Sources
@@ -63,6 +72,35 @@ read-only, so Steam leaves the game alone; new builds are followed at each
 start. State and downloads are shared with
 [steam-downgrader](https://github.com/sendement/steam-downgrader)
 (`~/.local/share/steam-downgrader`), so either tool sees the other's locks.
+
+### Proton
+
+The Proton page lists the compatibility tools installed (Steam's, custom,
+the system's packages) and how many games use each; installs the newest
+GE-Proton and Proton-CachyOS builds from their GitHub releases into
+`compatibilitytools.d` (checked against the release's SHA-512) and removes
+custom ones; Valve's own are installed and removed through Steam. A game's
+Compatibility tab also clears its shader caches (Steam's, DXVK/vkd3d, the
+drivers') and resets its prefix, moving the old one to the trash.
+
+### Interface sounds
+
+Moving, opening, the side menu, switches and sliders make sounds: Steam's
+own set from the client's `steamui/sounds`, or a Decky AudioLoader pack
+(the Sound packs page in the side panel shows the installed packs and
+DeckThemes' store as cards, most downloaded first; A installs and uses one). Packs keep AudioLoader's layout and
+`pack.json` (`ignore`, `mappings`); AudioLoader's own `~/homebrew/sounds`
+are picked up too.
+
+### Theme music
+
+With "Theme music on a game's page" on (Settings → General), a game's page
+plays its theme on a loop, fading in and out; it stops when the page
+closes or a game takes the focus. The idea comes from
+[NonSteamLaunchers](https://github.com/moraroy/NonSteamLaunchers-On-Steam-Deck):
+the track is found on YouTube through an Invidious instance ("<game> Game
+Theme Music", `LENTA_INVIDIOUS` picks another instance), its audio fetched
+through the instance and kept in `~/.cache/lenta/music`.
 
 Downloads (store pages, art, achievement icons) are kept in `~/.cache/lenta`.
 Settings live in `~/.config/lenta/config.toml`.

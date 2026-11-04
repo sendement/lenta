@@ -188,3 +188,34 @@ pub fn games() -> Vec<Game> {
     }
     out
 }
+
+/// Lutris's categories: (name, game keys). "favorite" is its favourites;
+/// names starting with "." (".hidden") are its own.
+pub fn categories() -> Vec<(String, Vec<String>)> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for (root, _) in roots() {
+        let Ok(db) = rusqlite::Connection::open_with_flags(
+            root.join("pga.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) else {
+            continue;
+        };
+        let Ok(mut st) = db.prepare(
+            "SELECT c.name, gc.game_id FROM categories c JOIN games_categories gc ON gc.category_id = c.id",
+        ) else {
+            continue;
+        };
+        let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+        else {
+            continue;
+        };
+        for (name, id) in rows.flatten() {
+            let key = format!("lutris:{id}");
+            match out.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, keys)) => keys.push(key),
+                None => out.push((name, vec![key])),
+            }
+        }
+    }
+    out
+}

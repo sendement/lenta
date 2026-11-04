@@ -14,6 +14,8 @@ fn icon_of(p: Page) -> Icon {
         Page::Home => Icon::Home,
         Page::Library => Icon::Library,
         Page::System => Icon::System,
+        Page::Proton => Icon::Proton,
+        Page::Sounds => Icon::Sound,
         Page::Settings => Icon::Settings,
         Page::About => Icon::About,
     }

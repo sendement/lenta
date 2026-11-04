@@ -164,3 +164,68 @@ fn wine_prefix(root: &std::path::Path, app: &str) -> Option<PathBuf> {
     };
     p.is_dir().then_some(p)
 }
+
+/// Heroic's favourites and own categories, as game-key patterns
+/// ("heroic:*:<appName>" when the runner isn't recorded).
+pub fn categories() -> Vec<(String, Vec<String>)> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for (root, _) in roots() {
+        let Some(v) = read_json(root.join("store/config.json")) else {
+            continue;
+        };
+        let pick = |paths: &[&str]| paths.iter().find_map(|p| v.pointer(p)).cloned();
+        // Favourites: [{appName, …}].
+        if let Some(list) = pick(&[
+            "/favouriteGames/list",
+            "/games/favouriteGames/list",
+            "/favourites",
+        ])
+        .and_then(|l| l.as_array().cloned())
+        {
+            let keys: Vec<String> = list
+                .iter()
+                .filter_map(|f| {
+                    let app = f
+                        .get("appName")
+                        .and_then(Value::as_str)
+                        .or_else(|| f.as_str())?;
+                    Some(format!("heroic:*:{app}"))
+                })
+                .collect();
+            if !keys.is_empty() {
+                out.push(("favorite".into(), keys));
+            }
+        }
+        // Own categories: {name: ["<appName>_<runner>", …]}.
+        if let Some(cats) = pick(&["/customCategories", "/games/customCategories"])
+            .and_then(|c| c.as_object().cloned())
+        {
+            for (name, list) in cats {
+                let keys: Vec<String> = list
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|e| match e.rsplit_once('_') {
+                        Some((app, runner))
+                            if ["legendary", "gog", "nile", "sideload"].contains(&runner) =>
+                        {
+                            format!("heroic:{runner}:{app}")
+                        }
+                        _ => format!("heroic:*:{e}"),
+                    })
+                    .collect();
+                out.push((name, keys));
+            }
+        }
+    }
+    out
+}
+
+/// Does a game key fit a category's pattern?
+pub fn key_matches(pattern: &str, key: &str) -> bool {
+    match pattern.strip_prefix("heroic:*:") {
+        Some(app) => key.starts_with("heroic:") && key.rsplit(':').next() == Some(app),
+        None => pattern == key,
+    }
+}

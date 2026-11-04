@@ -36,7 +36,7 @@ pub fn install(ctx: &egui::Context) {
     );
     add(
         "system-symbols",
-        "sans-serif:charset=2039 203a 21bb 2022 2014",
+        "sans-serif:charset=2039 203a 21bb 2022 2014 21e7 232b 21c4 23ce",
         egui::FontFamily::Proportional,
         1,
     );

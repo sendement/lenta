@@ -19,15 +19,19 @@ pub enum Page {
     Home,
     Library,
     System,
+    Proton,
+    Sounds,
     Settings,
     About,
 }
 
 impl Page {
-    pub const ALL: [Page; 5] = [
+    pub const ALL: [Page; 7] = [
         Page::Home,
         Page::Library,
         Page::System,
+        Page::Proton,
+        Page::Sounds,
         Page::Settings,
         Page::About,
     ];
@@ -37,6 +41,8 @@ impl Page {
             Page::Home => "home",
             Page::Library => "library",
             Page::System => "system",
+            Page::Proton => "proton",
+            Page::Sounds => "sound_store",
             Page::Settings => "settings",
             Page::About => "about",
         }
@@ -73,6 +79,7 @@ pub enum Tab {
     Screenshots,
     Compat,
     Versions,
+    Art,
 }
 
 pub struct GameView {
@@ -87,8 +94,21 @@ pub struct GameView {
     /// A screenshot shown big.
     pub shot: Option<usize>,
     pub shot_sel: usize,
-    /// The row in the compatibility tab.
+    /// The row in the compatibility tab (and the other lists).
     pub tool_sel: usize,
+    /// Hidden achievements shown on request (by id).
+    pub revealed: std::collections::HashSet<String>,
+    /// A was pressed on the chosen achievement: show/hide it.
+    pub reveal: bool,
+    /// The choice moved by keys: scroll it into view once (the wheel is
+    /// left alone otherwise).
+    pub follow: bool,
+    /// The header folded away by scrolling down (kept until scrolled up
+    /// at the top: the page gets taller as it folds, so it can't follow
+    /// the scroll itself).
+    pub folded: bool,
+    /// The tab's content is taller than the page with the header open.
+    pub overflow: bool,
     pub opened: Instant,
 }
 
@@ -103,10 +123,24 @@ pub struct SettingsState {
     pub follow: bool,
 }
 
+/// Where the choice is, for the sound watcher: whether a window is up,
+/// a game page open, the side panel, the page and the game's tab; then
+/// every selection.
+#[derive(PartialEq, Clone, Default)]
+struct NavMark {
+    modal: bool,
+    game: bool,
+    side: bool,
+    page: usize,
+    tab: usize,
+    sel: Vec<i64>,
+}
+
 struct Scan {
     games: Vec<Game>,
     apps: Vec<desktop::App>,
     steam: crate::ui::steam::SteamData,
+    shelves: sources::Shelves,
     /// The final word (after the network pass).
     last: bool,
 }
@@ -118,10 +152,38 @@ pub struct App {
     changed_at: Option<Instant>,
     /// Installed games, for the ribbon (the hidden collection left out).
     pub games: Vec<Game>,
+    /// Launchers' categories and soundtracks, for the library.
+    pub shelves: sources::Shelves,
+    /// Where the library is: its side tab, focus, an open collection.
+    pub libv: crate::ui::library::LibView,
     /// Steam's collections, tools and the account's other games.
     pub steam: crate::ui::steam::SteamData,
     /// Signing in to Steam, while its window is up.
     pub login: Option<crate::ui::steam::Login>,
+    /// Getting SteamGridDB's key.
+    pub sgdb: crate::ui::sgdb::SgdbUi,
+    /// The theme music player.
+    pub music: crate::music::Music,
+    /// Interface sounds.
+    pub sfx: crate::sfx::Sfx,
+    /// The sound packs page.
+    pub sounds: crate::ui::sounds::SoundsPage,
+    /// The Proton page.
+    pub proton: crate::ui::proton::ProtonPage,
+    /// A question before an action that can't be undone.
+    pub confirm: Option<crate::ui::confirm::Confirm>,
+    /// The launcher's own collections.
+    pub colls: crate::colls::Colls,
+    /// Typing a text (the on-screen keyboard).
+    pub osk: Option<crate::ui::osk::Osk>,
+    /// A context menu.
+    pub menu: Option<crate::ui::menu::Menu>,
+    /// Making or changing an own collection.
+    pub cedit: Option<crate::ui::colledit::CollEdit>,
+    /// The card chosen on the ribbon and since when (the theme waits).
+    home_pick: (Option<String>, Instant),
+    /// The Look tab's SteamGridDB pictures.
+    pub art: crate::ui::artpick::ArtPick,
     /// The Versions tab: builds, a download, a rollback.
     pub versions: crate::ui::versions::Versions,
     pub apps: Vec<desktop::App>,
@@ -157,16 +219,30 @@ pub struct App {
     pub dt: f32,
     pub time: f64,
     was_focused: bool,
+    /// The choice as the last frame left it.
+    nav: NavMark,
+    /// The last input of any kind (the watcher stays quiet otherwise: a
+    /// rescan moving the choice makes no sound).
+    last_input: Instant,
 }
 
 impl App {
     pub fn new(ctx: egui::Context) -> Self {
         let cfg = Config::load();
         crate::i18n::set(cfg.lang);
+        crate::keyboard::set_enabled(&crate::keyboard::default_codes(if crate::i18n::ru() {
+            "ru"
+        } else {
+            "en"
+        }));
+        if crate::i18n::ru() {
+            crate::keyboard::set_last_layout(1);
+        }
         let (pad_tx, pad_rx) = crossbeam_channel::unbounded();
         let c2 = ctx.clone();
         crate::input::spawn_gamepad(pad_tx, move || c2.request_repaint());
         let (scan_tx, scan_rx) = crossbeam_channel::unbounded();
+        let music_ctx = ctx.clone();
         let mut app = App {
             images: Images::new(ctx.clone()),
             store: Store::new(ctx.clone()),
@@ -176,8 +252,22 @@ impl App {
             changed_at: None,
             games: Vec::new(),
             steam: Default::default(),
+            shelves: Default::default(),
+            libv: Default::default(),
             login: None,
             versions: Default::default(),
+            sgdb: Default::default(),
+            art: Default::default(),
+            music: crate::music::Music::new(music_ctx),
+            home_pick: (None, Instant::now()),
+            confirm: None,
+            colls: crate::colls::Colls::load(),
+            osk: None,
+            menu: None,
+            cedit: None,
+            proton: Default::default(),
+            sfx: crate::sfx::Sfx::new(),
+            sounds: Default::default(),
             apps: Vec::new(),
             scanning: false,
             scan_tx,
@@ -210,6 +300,8 @@ impl App {
             dt: 0.016,
             time: 0.0,
             was_focused: true,
+            nav: NavMark::default(),
+            last_input: Instant::now(),
         };
         app.rescan();
         app
@@ -242,10 +334,12 @@ impl App {
             }
             // What's on disk shows at once; store matches, the account's
             // other games and art follow.
+            let shelves = sources::shelves(&cfg);
             let _ = tx.send(Scan {
                 games: games.clone(),
                 apps: apps.clone(),
                 steam: steam.clone(),
+                shelves: shelves.clone(),
                 last: false,
             });
             ctx.request_repaint();
@@ -255,6 +349,7 @@ impl App {
                 games,
                 apps,
                 steam,
+                shelves,
                 last: true,
             });
             ctx.request_repaint();
@@ -269,6 +364,9 @@ impl App {
             let keep = self.games.get(self.home.sel).map(|g| g.key.clone());
             // Games in the hidden collection stay out of the ribbon.
             let hidden = s.steam.hidden();
+            let mut s = s;
+            sources::web::apply_picks(&mut s.games);
+            sources::web::apply_picks(&mut s.steam.more);
             let (shown, hidden): (Vec<Game>, Vec<Game>) = s
                 .games
                 .into_iter()
@@ -301,6 +399,7 @@ impl App {
                 }
             }
             self.apps = s.apps;
+            self.shelves = s.shelves;
             if let Some(k) = keep
                 && let Some(i) = self.games.iter().position(|g| g.key == k)
             {
@@ -341,6 +440,7 @@ impl App {
             return;
         };
         let title = g.title.clone();
+        self.sfx.play(crate::sfx::Sound::Launch);
         let verb = if g.installed {
             tr("launching")
         } else {
@@ -363,6 +463,11 @@ impl App {
             shot: None,
             shot_sel: 0,
             tool_sel: 0,
+            revealed: Default::default(),
+            reveal: false,
+            follow: false,
+            folded: false,
+            overflow: false,
             opened: Instant::now(),
         });
     }
@@ -404,6 +509,11 @@ impl App {
 
     fn handle_keys(&mut self, ui: &Ui) -> Vec<Action> {
         let mut out = Vec::new();
+        // Typing: the keys are text.
+        if self.osk.is_some() {
+            self.osk_keys(ui);
+            return out;
+        }
         ui.input(|i| {
             for e in &i.events {
                 if let egui::Event::Key {
@@ -447,11 +557,190 @@ impl App {
         out
     }
 
+    /// Is a window up over everything (a question, the sign-in…)?
+    fn modal_open(&self) -> bool {
+        self.login.is_some()
+            || self.sgdb.ask.is_some()
+            || self.confirm.is_some()
+            || self.versions.ask.is_some()
+            || self.osk.is_some()
+            || self.menu.is_some()
+            || self.cedit.is_some()
+    }
+
+    fn nav_mark(&self) -> NavMark {
+        let g = self.game.as_ref();
+        let o = |x: Option<usize>| x.map_or(-1, |v| v as i64);
+        NavMark {
+            modal: self.modal_open(),
+            game: g.is_some(),
+            side: self.side_focus,
+            page: Page::ALL.iter().position(|p| *p == self.page).unwrap_or(0),
+            tab: g.map_or(0, |v| v.tab as usize),
+            sel: vec![
+                self.side_sel as i64,
+                self.home.sel as i64,
+                self.lib.sel as i64,
+                self.lib.filter as i64,
+                self.libv.shelf as i64,
+                self.libv.side as i64,
+                o(self.libv.open),
+                self.libv.my_open.map_or(-1, |v| v as i64),
+                self.sys.sel as i64,
+                self.sys.filter as i64,
+                self.set.sel as i64,
+                self.sounds.tab as i64,
+                self.sounds.grid.sel as i64,
+                self.proton.sel as i64,
+                g.map_or(-1, |v| v.focus as i64),
+                g.map_or(-1, |v| v.tool_sel as i64),
+                g.map_or(-1, |v| v.shot_sel as i64),
+                o(g.and_then(|v| v.shot)),
+                o(self.menu.as_ref().map(|m| m.sel)),
+                o(self.cedit.as_ref().map(|e| e.sel)),
+                o(self.cedit.as_ref().map(|e| e.btn)),
+            ],
+        }
+    }
+
+    /// The mouse, the wheel and dragging change things without an action:
+    /// a sound for what changed this frame, when nothing played one; and
+    /// a click on anything gives the press sound.
+    fn sound_watch(&mut self, ctx: &egui::Context) {
+        use crate::sfx::Sound;
+        let now = self.nav_mark();
+        let before = std::mem::replace(&mut self.nav, now.clone());
+        if ctx.input(|i| !i.events.is_empty() || i.pointer.any_down()) {
+            self.last_input = Instant::now();
+        }
+        // The first frame, or nothing done lately (a flicked ribbon still
+        // gliding counts as lately).
+        if self.sfx.take_played()
+            || before.sel.is_empty()
+            || self.last_input.elapsed() > Duration::from_millis(1500)
+        {
+            return;
+        }
+        let clicked = ctx.interaction_snapshot(|s| s.clicked.is_some());
+        let sound = if before.modal != now.modal {
+            Some(if now.modal {
+                Sound::ShowModal
+            } else {
+                Sound::HideModal
+            })
+        } else if before.game != now.game {
+            Some(if now.game {
+                Sound::IntoDetail
+            } else {
+                Sound::OutOfDetail
+            })
+        } else if before.side != now.side {
+            Some(if now.side {
+                Sound::MenuIn
+            } else {
+                Sound::MenuOut
+            })
+        } else if before.page != now.page || before.tab != now.tab {
+            Some(Sound::Tab)
+        } else if clicked {
+            Some(Sound::Activate)
+        } else if before.sel != now.sel {
+            Some(Sound::Navigate)
+        } else {
+            None
+        };
+        if let Some(s) = sound {
+            self.sfx.play(s);
+            self.sfx.take_played();
+        }
+    }
+
+    /// An action, with the sound for what it did.
     pub(crate) fn handle(&mut self, a: Action) {
+        use crate::sfx::Sound;
+        let snap = |app: &App| {
+            (
+                app.game.is_some(),
+                app.side_focus,
+                app.page,
+                app.modal_open(),
+                app.game.as_ref().map(|v| v.tab),
+            )
+        };
+        let before = snap(self);
+        self.handle_quiet(a);
+        let after = snap(self);
+        let sound = if before.3 != after.3 {
+            Some(if after.3 {
+                Sound::ShowModal
+            } else {
+                Sound::HideModal
+            })
+        } else if before.0 != after.0 {
+            Some(if after.0 {
+                Sound::IntoDetail
+            } else {
+                Sound::OutOfDetail
+            })
+        } else if before.1 != after.1 {
+            Some(if after.1 {
+                Sound::MenuIn
+            } else {
+                Sound::MenuOut
+            })
+        } else if before.2 != after.2 || before.4 != after.4 {
+            Some(Sound::Tab)
+        } else {
+            match a {
+                // Settings' ← → change values: their own sounds.
+                Action::Left | Action::Right
+                    if self.page == Page::Settings && self.game.is_none() && !self.side_focus =>
+                {
+                    None
+                }
+                // …and A there toggles or presses: theirs too.
+                Action::Accept
+                    if self.page == Page::Settings && self.game.is_none() && !self.side_focus =>
+                {
+                    None
+                }
+                Action::Up | Action::Down | Action::Left | Action::Right => Some(Sound::Navigate),
+                Action::Accept => Some(Sound::Activate),
+                Action::LeftTrigger | Action::RightTrigger => Some(Sound::Navigate),
+                _ => None,
+            }
+        };
+        if let Some(s) = sound {
+            self.sfx.play(s);
+        }
+    }
+
+    fn handle_quiet(&mut self, a: Action) {
+        if self.osk.is_some() {
+            self.osk_input(a);
+            return;
+        }
         if self.login.is_some() {
             self.login_input(a);
             return;
         }
+        if self.sgdb.ask.is_some() {
+            self.sgdb_input(a);
+            return;
+        }
+        if self.confirm.is_some() {
+            self.confirm_input(a);
+            return;
+        }
+        if self.cedit.is_some() {
+            self.cedit_input(a);
+            return;
+        }
+        if self.menu.is_some() {
+            self.menu_input(a);
+            return;
+        }
+
         if self.game.is_some() {
             self.game_input(a);
             return;
@@ -503,6 +792,8 @@ impl App {
             Page::System => self.system_input(a),
             Page::Settings => self.settings_input(a),
             Page::About => a == Action::Back,
+            Page::Proton => self.proton_input(a),
+            Page::Sounds => self.sounds_input(a),
         };
         if back && self.page != Page::Home {
             self.go(Page::Home);
@@ -510,6 +801,38 @@ impl App {
     }
 
     pub fn hint_items(&self) -> Vec<(Btn, &'static str)> {
+        if self.osk.is_some() {
+            return vec![
+                (Btn::A, tr("osk_key")),
+                (Btn::X, tr("osk_erase")),
+                (Btn::Y, tr("osk_space")),
+                (Btn::LT, "Shift"),
+                (Btn::View, tr("osk_layout")),
+                (Btn::Menu, tr("osk_done")),
+                (Btn::B, tr("cancel")),
+            ];
+        }
+        if self.confirm.is_some() {
+            return vec![(Btn::A, tr("yes")), (Btn::B, tr("cancel"))];
+        }
+        if self.cedit.is_some() {
+            return vec![
+                (Btn::Dpad, tr("change")),
+                (Btn::A, tr("choose")),
+                (Btn::Menu, tr("coll_save")),
+                (Btn::B, tr("cancel")),
+            ];
+        }
+        if self.menu.is_some() {
+            return vec![(Btn::A, tr("choose")), (Btn::B, tr("close"))];
+        }
+        if self.sgdb.ask.is_some() {
+            return vec![
+                (Btn::Dpad, tr("sgdb_pick_name")),
+                (Btn::A, tr("sgdb_create")),
+                (Btn::B, tr("cancel")),
+            ];
+        }
         if let Some(l) = &self.login {
             let mut v = vec![(Btn::B, tr("back"))];
             if l.failed() {
@@ -534,6 +857,20 @@ impl App {
                     (Btn::B, tr("back")),
                 ];
             }
+            if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Achievements {
+                return vec![
+                    (Btn::Dpad, tr("scroll")),
+                    (Btn::A, tr("ach_toggle")),
+                    (Btn::B, tr("back")),
+                ];
+            }
+            if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Art {
+                return vec![
+                    (Btn::Dpad, tr("art_browse")),
+                    (Btn::A, tr("art_take_btn")),
+                    (Btn::B, tr("back")),
+                ];
+            }
             if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Compat {
                 return vec![
                     (Btn::A, tr("choose")),
@@ -550,21 +887,58 @@ impl App {
                 (Btn::LT, tr("tab")),
                 (Btn::B, tr("back")),
             ]);
+            if self.cfg.theme_music
+                && self
+                    .music
+                    .now
+                    .lock()
+                    .ok()
+                    .and_then(|n| n.clone())
+                    .is_some_and(|(_, song)| !song.is_empty())
+            {
+                v.insert(v.len() - 1, (Btn::Y, tr("music_next")));
+            }
             return v;
         }
         if self.side_focus {
             return vec![(Btn::A, tr("open")), (Btn::B, tr("back"))];
         }
         let mut v = match self.page {
-            Page::Home => vec![(Btn::A, tr("open")), (Btn::X, tr("play"))],
+            Page::Home => vec![
+                (Btn::A, tr("open")),
+                (Btn::X, tr("play")),
+                (Btn::Y, tr("ctx_menu")),
+            ],
+            Page::Library if self.libv.side => vec![
+                (Btn::Dpad, tr("lib_shelf")),
+                (Btn::A, tr("open")),
+                (Btn::LT, tr("lib_launcher")),
+            ],
             Page::Library => vec![
                 (Btn::A, tr("open")),
                 (Btn::X, tr("play")),
-                (Btn::LT, tr("filter")),
+                (Btn::Y, tr("ctx_menu")),
+                (
+                    Btn::B,
+                    if self.libv.open.is_some() || self.libv.my_open.is_some() {
+                        tr("back")
+                    } else {
+                        tr("lib_shelves")
+                    },
+                ),
+                (Btn::LT, tr("lib_launcher")),
             ],
             Page::System => vec![(Btn::A, tr("launch")), (Btn::LT, tr("filter"))],
             Page::Settings => vec![(Btn::Dpad, tr("change")), (Btn::B, tr("back"))],
             Page::About => vec![],
+            Page::Proton => vec![(Btn::A, tr("pu_act")), (Btn::Dpad, tr("scroll"))],
+            Page::Sounds => {
+                let mut v = vec![(Btn::A, tr("sounds_use_btn")), (Btn::LT, tr("sounds_tab"))];
+                if self.sounds.tab == 0 {
+                    v.push((Btn::X, tr("pu_remove_short")));
+                }
+                v
+            }
         };
         v.push((Btn::LB, tr("pages")));
         v.push((Btn::View, tr("menu")));
@@ -623,6 +997,8 @@ impl App {
             || self.scanning
             || self.steam.restart.is_some()
             || self.versions.op.is_some()
+            || self.sgdb.job.is_some()
+            || self.proton.job.is_some()
     }
 
     pub fn ease(&self, rate: f32) -> f32 {
@@ -644,6 +1020,7 @@ impl eframe::App for App {
         self.take_scan();
         self.pump_restart();
         self.pump_versions();
+        self.pump_sgdb();
         self.images.pump();
         self.store.pump();
         // The pad is read globally; never act on it while another window
@@ -657,6 +1034,7 @@ impl eframe::App for App {
                     self.glyphs = Glyphs::Pad(k);
                 }
                 Input::Press(a) if focused => {
+                    self.last_input = Instant::now();
                     self.glyphs = Glyphs::Pad(self.pad_kind);
                     self.last_pad = Some(Instant::now());
                     self.handle(a)
@@ -682,6 +1060,50 @@ impl eframe::App for App {
             self.rescan();
         }
         self.was_focused = focused;
+        // Theme music while a game's page is open and the launcher is in
+        // front (a game started takes the focus: the music fades out).
+        // On the ribbon: the chosen card's, once the ribbon has settled on it
+        // for a moment, rising slowly.
+        let sel_key = self.games.get(self.home.sel).map(|g| g.key.clone());
+        if sel_key != self.home_pick.0 {
+            self.home_pick = (sel_key, Instant::now());
+        }
+        let settled = (self.home.pos - self.home.sel as f32).abs() < 0.02 && !self.home.dragging;
+        let on = self.cfg.theme_music && focused && std::env::var_os("LENTA_DRY_RUN").is_none();
+        let (theme, fade) = if !on {
+            (None, 1.0)
+        } else if let Some(v) = &self.game {
+            (
+                self.game_by_key(&v.key)
+                    .map(|g| (g.key.clone(), g.title.clone())),
+                1.5,
+            )
+        } else if self.page == Page::Home
+            && self.cfg.theme_music_ribbon
+            && !self.side_focus
+            && settled
+            && self.home_pick.1.elapsed() > Duration::from_millis(1200)
+        {
+            (
+                self.selected_game()
+                    .map(|g| (g.key.clone(), g.title.clone())),
+                4.0,
+            )
+        } else {
+            (None, 1.0)
+        };
+        self.music
+            .want(theme.as_ref().map(|(k, t)| (k.as_str(), t.as_str())), fade);
+        // The wait above ends without any input: look again then.
+        if on && self.home_pick.1.elapsed() < Duration::from_millis(1300) {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
+        self.music.volume(self.cfg.music_volume);
+        self.sfx.set(
+            self.cfg.ui_sounds,
+            &self.cfg.sound_pack,
+            self.cfg.sound_volume,
+        );
         if self
             .toast
             .as_ref()
@@ -729,6 +1151,8 @@ impl eframe::App for App {
                         Page::System => self.draw_system(ui, body),
                         Page::Settings => self.draw_settings(ui, body),
                         Page::About => self.draw_about(ui, body),
+                        Page::Proton => self.draw_proton(ui, body),
+                        Page::Sounds => self.draw_sounds(ui, body),
                     }
                 }
                 let hints =
@@ -761,8 +1185,25 @@ impl eframe::App for App {
                 if self.login.is_some() {
                     self.draw_login(ui, full);
                 }
+                if self.sgdb.ask.is_some() {
+                    self.draw_sgdb_ask(ui, full);
+                }
+
+                if self.menu.is_some() {
+                    self.draw_menu(ui, full);
+                }
+                if self.cedit.is_some() {
+                    self.draw_cedit(ui, full);
+                }
+                if self.confirm.is_some() {
+                    self.draw_confirm(ui, full);
+                }
+                if self.osk.is_some() {
+                    self.draw_osk(ui, full);
+                }
                 self.draw_toast(ui, full);
             });
+        self.sound_watch(&ctx);
         self.save_later();
         if self.animating() {
             ctx.request_repaint();

@@ -57,11 +57,7 @@ impl App {
         let p = ui.painter_at(full);
         // A launcher's tab in the library tints the page in its colours.
         let source = (self.page == crate::app::Page::Library && self.game.is_none())
-            .then(|| match self.lib_filter() {
-                super::library::LibFilter::Source(s) => Some(s),
-                super::library::LibFilter::Collection(_) => Some(crate::game::Source::Steam),
-                _ => None,
-            })
+            .then(|| self.lib_source())
             .flatten();
         let target = match source {
             Some(s) => {
@@ -220,6 +216,10 @@ impl App {
             Action::Back => return true,
             Action::Home => self.home.sel = 0,
             Action::End => self.home.sel = n - 1,
+            Action::Actions => {
+                let k = self.games[self.home.sel].key.clone();
+                self.open_menu(crate::ui::menu::MenuFor::Game(k), None);
+            }
             Action::Accept => {
                 let k = self.games[self.home.sel].key.clone();
                 self.open_game(k);

@@ -189,6 +189,13 @@ pub fn assets(appid: u32) -> Option<[Option<Art>; 4]> {
 /// lack; give Steam's own games the store's sharper covers. A few games
 /// at a time: the first run waits on the network, later ones on the cache.
 pub fn enrich(games: &mut [Game]) {
+    enrich_with(games, true)
+}
+
+/// `logos`: also fill missing logos and backgrounds from SteamGridDB (for
+/// the installed games; the account's hundreds of others get covers only).
+pub fn enrich_with(games: &mut [Game], logos: bool) {
+    let sgdb = crate::sgdb::key();
     let queue = std::sync::Mutex::new(games.iter_mut());
     std::thread::scope(|s| {
         for _ in 0..8 {
@@ -203,10 +210,76 @@ pub fn enrich(games: &mut [Game]) {
                         Some(id) => sharpen(g, id),
                         None => match_store(g),
                     }
+                    if let Some(k) = &sgdb {
+                        fill_from_sgdb(g, k, logos);
+                    }
                 }
             });
         }
     });
+}
+
+/// What the launcher and the store don't have, from SteamGridDB's best.
+fn fill_from_sgdb(g: &mut Game, key: &str, logos: bool) {
+    use crate::sgdb::ArtKind;
+    let a = &g.art;
+    let missing: Vec<ArtKind> = [
+        (ArtKind::Portrait, a.portrait.is_none()),
+        (
+            ArtKind::Landscape,
+            a.landscape.is_none() && a.landscape_alt.is_none(),
+        ),
+        (ArtKind::Hero, logos && a.hero.is_none()),
+        (ArtKind::Logo, logos && a.logo.is_none()),
+    ]
+    .into_iter()
+    .filter_map(|(k, m)| m.then_some(k))
+    .collect();
+    if missing.is_empty() {
+        return;
+    }
+    let Some(id) = crate::sgdb::game_id(key, g.steam_appid.or(g.store_appid), &g.title) else {
+        return;
+    };
+    for kind in missing {
+        let Some(best) = crate::sgdb::assets(key, id, kind).into_iter().next() else {
+            continue;
+        };
+        let art = Some(Art::Url(best.url));
+        match kind {
+            ArtKind::Portrait => g.art.portrait = art,
+            ArtKind::Landscape => g.art.landscape = art,
+            ArtKind::Hero => g.art.hero = art,
+            ArtKind::Logo => g.art.logo = art,
+        }
+    }
+}
+
+/// The pictures picked by hand (SteamGridDB) over whatever was found.
+pub fn apply_picks(games: &mut [Game]) {
+    let picks = crate::sgdb::picks();
+    if picks.is_empty() {
+        return;
+    }
+    for g in games.iter_mut() {
+        let Some(p) = picks.get(&g.key) else { continue };
+        for (kind, url) in p {
+            let art = Some(Art::Url(url.clone()));
+            match kind.as_str() {
+                "portrait" => {
+                    g.art.portrait = art;
+                    g.art.portrait_alt = None;
+                }
+                "landscape" => {
+                    g.art.landscape = art;
+                    g.art.landscape_alt = None;
+                }
+                "hero" => g.art.hero = art,
+                "logo" => g.art.logo = art,
+                _ => {}
+            }
+        }
+    }
 }
 
 fn match_store(g: &mut Game) {

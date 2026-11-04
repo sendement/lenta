@@ -219,6 +219,20 @@ impl Account {
     }
 
     fn web_session_token(&self) -> Result<String, String> {
+        for (name, value) in self.web_cookies("store.steampowered.com")? {
+            if name == "steamLoginSecure"
+                && let Some((_, token)) = percent_decode(&value).split_once("||")
+            {
+                return Ok(token.to_string());
+            }
+        }
+        Err("settoken: no session cookie".into())
+    }
+
+    /// Sign in to one of Steam's sites (`host`: "steamcommunity.com",
+    /// "store.steampowered.com"…) as the website does: the refresh token
+    /// becomes a session there. Returns the cookies the site set.
+    pub fn web_cookies(&self, host: &str) -> Result<Vec<(String, String)>, String> {
         if std::env::var_os("LENTA_OFFLINE").is_some() {
             return Err("offline".into());
         }
@@ -250,21 +264,22 @@ impl Account {
             .get("steamID")
             .and_then(Value::as_str)
             .ok_or("finalizelogin: no steamID")?;
-        let transfers = v
+        let transfer = v
             .get("transfer_info")
             .and_then(Value::as_array)
-            .ok_or("finalizelogin: no transfer_info")?;
-        let store = transfers
-            .iter()
+            .into_iter()
+            .flatten()
             .find(|t| {
                 t.get("url")
                     .and_then(Value::as_str)
-                    .is_some_and(|u| u.contains("store.steampowered.com"))
+                    .is_some_and(|u| u.contains(host))
             })
-            .or_else(|| transfers.first())
-            .ok_or("finalizelogin: no transfer")?;
-        let url = store.get("url").and_then(Value::as_str).unwrap_or_default();
-        let params = store.get("params").ok_or("finalizelogin: no params")?;
+            .ok_or_else(|| format!("finalizelogin: no session for {host}"))?;
+        let url = transfer
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let params = transfer.get("params").ok_or("finalizelogin: no params")?;
         let s = |k: &str| params.get(k).and_then(Value::as_str).unwrap_or_default();
         let resp = post(
             url,
@@ -274,21 +289,16 @@ impl Account {
                 ("steamID", steamid),
             ],
         )?;
-        for c in resp.headers().get_all("set-cookie") {
-            let Ok(c) = c.to_str() else { continue };
-            let Some(v) = c
-                .split(';')
-                .next()
-                .and_then(|kv| kv.strip_prefix("steamLoginSecure="))
-            else {
-                continue;
-            };
-            let v = percent_decode(v);
-            if let Some((_, token)) = v.split_once("||") {
-                return Ok(token.to_string());
-            }
-        }
-        Err("settoken: no session cookie".into())
+        Ok(resp
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|c| {
+                let kv = c.to_str().ok()?.split(';').next()?;
+                let (n, v) = kv.split_once('=')?;
+                Some((n.trim().to_string(), v.trim().to_string()))
+            })
+            .collect())
     }
 }
 

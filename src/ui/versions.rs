@@ -350,7 +350,7 @@ impl App {
             let h = if *row == Row::Action { 58.0 } else { 64.0 };
             let r = Rect::from_min_size(pos2(body.left(), y), vec2(w, h - 8.0));
             y += h;
-            if focus_inside && i == sel {
+            if focus_inside && i == sel && self.game.as_ref().is_some_and(|v| v.follow) {
                 let top = r.top() + scroll - body.top();
                 if let Some(v) = self.game.as_mut() {
                     if r.bottom() > body.bottom() {

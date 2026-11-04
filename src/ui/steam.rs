@@ -84,7 +84,7 @@ impl SteamData {
         let ids: Vec<u32> = rest.iter().map(|o| o.appid).collect();
         crate::sources::web::prefetch_assets(&ids);
         let mut more = crate::sources::steam::uninstalled(&rest);
-        crate::sources::web::enrich(&mut more);
+        crate::sources::web::enrich_with(&mut more, false);
         self.more = more;
     }
 

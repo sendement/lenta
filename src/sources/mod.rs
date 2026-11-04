@@ -11,6 +11,35 @@ pub mod web;
 use crate::config::{Config, Sort};
 use crate::game::Game;
 
+/// What the library shelves beyond the games: the launchers' own
+/// categories (favourites included) and Steam's installed soundtracks.
+#[derive(Clone, Default)]
+pub struct Shelves {
+    pub lutris: Vec<(String, Vec<String>)>,
+    pub heroic: Vec<(String, Vec<String>)>,
+    pub soundtracks: Vec<Game>,
+}
+
+pub fn shelves(cfg: &Config) -> Shelves {
+    Shelves {
+        lutris: if cfg.lutris {
+            lutris::categories()
+        } else {
+            Vec::new()
+        },
+        heroic: if cfg.heroic {
+            heroic::categories()
+        } else {
+            Vec::new()
+        },
+        soundtracks: if cfg.steam {
+            steam::soundtracks()
+        } else {
+            Vec::new()
+        },
+    }
+}
+
 /// Every installed game from the enabled sources.
 pub fn scan(cfg: &Config) -> Vec<Game> {
     let (steam, heroic, lutris) = (cfg.steam, cfg.heroic, cfg.lutris);
