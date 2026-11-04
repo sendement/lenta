@@ -9,7 +9,6 @@ says what it would do.
 import json
 import os
 import platform
-import shlex
 import shutil
 import signal
 import subprocess
@@ -380,6 +379,50 @@ def size(b):
     return ""
 
 
+def pci_name(vendor, device):
+    """A PCI device's name from pci.ids (no device is touched: lspci reads
+    each one's config space, which wakes a sleeping discrete GPU — seconds)."""
+    for path in ("/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"):
+        try:
+            f = open(path, encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        vname = None
+        with f:
+            for line in f:
+                if line.startswith("#") or not line.strip():
+                    continue
+                if not line.startswith("\t"):
+                    if vname is not None:
+                        break
+                    if line[:4].lower() == vendor:
+                        vname = line[4:].strip()
+                elif vname is not None and not line.startswith("\t\t") and line[1:5].lower() == device:
+                    return vname, line[5:].strip()
+        if vname:
+            return vname, ""
+    return "", ""
+
+
+def gpus():
+    """Display controllers, from sysfs (cached ids: nothing wakes)."""
+    out = []
+    base = "/sys/bus/pci/devices"
+    for d in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        cls = read(f"{base}/{d}/class")
+        if not cls.startswith("0x03"):
+            continue
+        vendor, device = read(f"{base}/{d}/vendor")[2:], read(f"{base}/{d}/device")[2:]
+        vname, dname = pci_name(vendor, device)
+        if not dname:
+            continue
+        for long, short in (("Intel Corporation", "Intel"), ("NVIDIA Corporation", "NVIDIA"),
+                            ("Advanced Micro Devices, Inc. [AMD/ATI]", "AMD")):
+            vname = vname.replace(long, short)
+        out.append(f"{vname} {dname}")
+    return out
+
+
 def about_page():
     items = []
     vendor = read("/sys/class/dmi/id/sys_vendor")
@@ -405,16 +448,8 @@ def about_page():
             break
     items.append({"type": "info", "label": t("Processor", "Процессор"),
                   "value": f"{cpu} · {os.cpu_count()} " + t("threads", "потоков")})
-    for line in run("lspci", "-mm").splitlines():
-        try:
-            f = shlex.split(line)
-        except ValueError:
-            continue
-        # slot, class, vendor, device…
-        if len(f) >= 4 and any(k in f[1] for k in ("VGA", "3D", "Display")) \
-                and not f[3].startswith("Device "):
-            vendor = f[2].replace(" Corporation", "").replace("Advanced Micro Devices, Inc. ", "")
-            items.append({"type": "info", "label": t("Graphics", "Видеокарта"), "value": f"{vendor} {f[3]}"})
+    for name in gpus():
+        items.append({"type": "info", "label": t("Graphics", "Видеокарта"), "value": name})
     mem = {}
     for line in read("/proc/meminfo").splitlines():
         k, _, v = line.partition(":")

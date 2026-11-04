@@ -587,7 +587,16 @@ impl ModView {
         r
     }
 
+    /// Questions about pages no longer shown are left unasked (flicking
+    /// through the panel mustn't queue every part on the way).
+    fn drop_stale(&mut self) {
+        let cur = self.current().to_string();
+        self.queue
+            .retain(|q| q["op"] != "page" || q["page"].as_str() == Some(cur.as_str()));
+    }
+
     pub fn fetch(&mut self) {
+        self.drop_stale();
         // One look is enough.
         if self
             .queue
@@ -857,5 +866,36 @@ mod tests {
         let p = page_of(&v).unwrap();
         assert_eq!(p.items[0].kind, Kind::Toggle(true));
         let _ = std::fs::remove_dir_all(data);
+    }
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+
+    #[test]
+    fn flicking_asks_only_the_last() {
+        let mut v = ModView::new("x", None, "a");
+        // "a" is asked first (nothing runs yet: no pump), then three more.
+        for p in ["b", "c", "d"] {
+            v.root(p);
+        }
+        let pages: Vec<_> = v.queue.iter().map(|q| q["page"].clone()).collect();
+        assert_eq!(pages, vec![json!("d")]);
+        // A change waits its turn; a look at another page doesn't stay.
+        v.set("on", json!(true));
+        v.root("e");
+        let ops: Vec<_> = v
+            .queue
+            .iter()
+            .map(|q| {
+                format!(
+                    "{}:{}",
+                    q["op"].as_str().unwrap(),
+                    q["page"].as_str().unwrap()
+                )
+            })
+            .collect();
+        assert_eq!(ops, vec!["set:d", "page:e"]);
     }
 }
