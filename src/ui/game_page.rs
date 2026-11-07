@@ -49,6 +49,9 @@ impl App {
         if self.sgdb.has_key == Some(true) {
             v.push(Tab::Art);
         }
+        if self.has_launch_tab(g) {
+            v.push(Tab::Launch);
+        }
         v.extend(self.mod_tabs(g));
         v
     }
@@ -202,6 +205,15 @@ impl App {
             }
             return;
         }
+        // The launch options.
+        if inside && v.tab == Tab::Launch {
+            if self.launch_input(&g, a)
+                && let Some(v) = self.game.as_mut()
+            {
+                v.focus = tab_i + 1;
+            }
+            return;
+        }
         // A module's tab: its own page.
         if inside && let Tab::Module(_) = v.tab {
             let at_top = self.mods.game.as_ref().is_none_or(|m| m.at_top());
@@ -324,7 +336,10 @@ impl App {
                     v.focus = INSIDE;
                     v.tool_sel = 0;
                 }
-                Tab::Module(_) => v.focus = INSIDE,
+                Tab::Module(_) | Tab::Launch => {
+                    v.focus = INSIDE;
+                    v.tool_sel = 0;
+                }
                 _ => {
                     v.folded |= v.overflow;
                     v.scroll = (v.scroll + 160.0).min(v.max_scroll);
@@ -342,9 +357,8 @@ impl App {
                 } else if v.tab == Tab::Versions && ver_rows > 0 {
                     v.focus = INSIDE;
                     v.tool_sel = ver_start;
-                } else if matches!(v.tab, Tab::Module(_)) {
-                    v.focus = INSIDE;
-                } else if (v.tab == Tab::Achievements && ach_rows > 0)
+                } else if matches!(v.tab, Tab::Module(_) | Tab::Launch)
+                    || (v.tab == Tab::Achievements && ach_rows > 0)
                     || (v.tab == Tab::Art && art_rows > 0)
                 {
                     v.focus = INSIDE;
@@ -556,37 +570,114 @@ impl App {
         let tab = self.game.as_ref().map(|v| v.tab).unwrap_or(Tab::Overview);
         let play_r = Rect::from_min_size(pos2(rect.left() + pad, row_y), vec2(210.0, 58.0));
         let play_resp = ui.interact(play_r, ui.id().with("play"), Sense::click());
-        card::draw(
-            &p,
-            &Pose::flat(play_r, 14.0),
-            &card::Fill::Gradient(c1, c2),
-            Color32::WHITE,
-            None,
-        );
+        // What the button says: Play, Close (running), Starting…, or
+        // Steam's work on it with how far it got.
+        let running = self.is_running(&g.key);
+        let starting = !running && self.is_starting(&g.key);
+        let work = if running { None } else { self.work_of(&g.key) };
+        let (main, sub): (String, Option<String>) = if running {
+            (tr("stop_game").into(), Some(tr("st_running").into()))
+        } else if starting {
+            (tr("starting").into(), None)
+        } else {
+            match work {
+                Some(crate::running::Work::Updating { .. }) => (
+                    tr("st_updating").into(),
+                    work.and_then(|w| w.frac())
+                        .map(|f| format!("{}%", (f * 100.0).round() as u32)),
+                ),
+                Some(crate::running::Work::Paused { .. }) => {
+                    (tr("play").into(), Some(tr("st_paused").into()))
+                }
+                Some(crate::running::Work::Queued) => {
+                    (tr("play").into(), Some(tr("st_queued").into()))
+                }
+                None if g.installed => (tr("play").into(), None),
+                None => (tr("install").into(), None),
+            }
+        };
+        if running {
+            p.rect_filled(play_r, 14.0, Color32::from_rgb(178, 58, 72));
+        } else if let Some(f) = work.and_then(|w| w.frac()) {
+            // The bar fills the button as it goes.
+            p.rect_filled(play_r, 14.0, Color32::from_white_alpha(30));
+            let done = Rect::from_min_size(
+                play_r.min,
+                vec2(play_r.width() * f.max(0.04), play_r.height()),
+            );
+            card::draw(
+                &p,
+                &Pose::flat(done, 14.0),
+                &card::Fill::Gradient(c1, c2),
+                Color32::WHITE,
+                None,
+            );
+        } else {
+            card::draw(
+                &p,
+                &Pose::flat(play_r, 14.0),
+                &card::Fill::Gradient(c1, c2),
+                Color32::WHITE,
+                None,
+            );
+            if starting {
+                // Breathing while Steam gets it going.
+                let a = ((self.time * 3.0).sin() * 0.5 + 0.5) as f32;
+                p.rect_filled(
+                    play_r,
+                    14.0,
+                    Color32::from_black_alpha((40.0 + 50.0 * a) as u8),
+                );
+            }
+        }
         p.rect_stroke(
             play_r,
             14.0,
             Stroke::new(if focus == 0 { 3.0 } else { 0.0 }, Color32::WHITE),
             StrokeKind::Inside,
         );
-        widgets::icon(
-            &p,
-            pos2(play_r.left() + 40.0, play_r.center().y),
-            24.0,
-            Icon::Play,
-            Color32::WHITE,
-        );
-        p.text(
-            pos2(play_r.left() + 64.0, play_r.center().y),
-            Align2::LEFT_CENTER,
-            if g.installed {
-                tr("play")
-            } else {
-                tr("install")
-            },
-            FontId::proportional(24.0),
-            Color32::WHITE,
-        );
+        let ic = pos2(play_r.left() + 40.0, play_r.center().y);
+        if running {
+            p.rect_filled(
+                Rect::from_center_size(ic, vec2(18.0, 18.0)),
+                3.0,
+                Color32::WHITE,
+            );
+        } else {
+            widgets::icon(&p, ic, 24.0, Icon::Play, Color32::WHITE);
+        }
+        let size: f32 = if main.chars().count() > 10 {
+            20.0
+        } else {
+            24.0
+        };
+        match sub {
+            Some(sub) => {
+                p.text(
+                    pos2(play_r.left() + 64.0, play_r.center().y - 9.0),
+                    Align2::LEFT_CENTER,
+                    main,
+                    FontId::proportional(size.min(21.0)),
+                    Color32::WHITE,
+                );
+                p.text(
+                    pos2(play_r.left() + 64.0, play_r.center().y + 13.0),
+                    Align2::LEFT_CENTER,
+                    sub,
+                    FontId::proportional(13.0),
+                    Color32::from_white_alpha(220),
+                );
+            }
+            None => {
+                p.text(
+                    pos2(play_r.left() + 64.0, play_r.center().y),
+                    Align2::LEFT_CENTER,
+                    main,
+                    FontId::proportional(size),
+                    Color32::WHITE,
+                );
+            }
+        }
         if play_resp.clicked() {
             let k = g.key.clone();
             self.play(&k);
@@ -603,6 +694,7 @@ impl App {
                     None => tr("achievements").to_string(),
                 },
                 Tab::Screenshots => tr("screenshots").to_string(),
+                Tab::Launch => tr("launch_tab").to_string(),
                 Tab::Module(i) => self.mod_tab_label(*i),
             };
             let galley = p.layout_no_wrap(label, FontId::proportional(19.0), Color32::WHITE);
@@ -693,6 +785,7 @@ impl App {
                     .unwrap_or((false, 0));
                 self.draw_art(ui, body, &g, eased, focus, sel)
             }
+            Tab::Launch => self.draw_launch(ui, body, &g, eased),
             Tab::Module(i) => {
                 let focus = self.game.as_ref().is_some_and(|v| v.focus == INSIDE);
                 self.draw_mod_tab(ui, body, &g, i, eased, focus)

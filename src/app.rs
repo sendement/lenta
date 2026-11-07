@@ -76,6 +76,8 @@ pub enum Tab {
     Compat,
     Versions,
     Art,
+    /// The launch options, in step with the launcher's.
+    Launch,
     /// A module's tab (its place in the modules' list).
     Module(u16),
 }
@@ -90,7 +92,8 @@ impl Tab {
             Tab::Compat => 3,
             Tab::Versions => 4,
             Tab::Art => 5,
-            Tab::Module(i) => 6 + i as usize,
+            Tab::Launch => 6,
+            Tab::Module(i) => 7 + i as usize,
         }
     }
 }
@@ -183,6 +186,18 @@ pub struct App {
     pub sounds: crate::ui::sounds::SoundsPage,
     /// External modules and their pages as shown.
     pub mods: crate::ui::modules::Mods,
+    /// Games' launch options and what modules add to their starts.
+    pub launch: crate::launch::Launch,
+    /// The game whose options were last looked at (the Launch tab).
+    pub start_seen: Option<String>,
+    /// Games running and what Steam does with them (a thread looks).
+    pub running: crate::running::Shared,
+    /// The games that thread looks at.
+    watch: std::sync::Arc<std::sync::Mutex<Vec<crate::running::Watch>>>,
+    /// Running when last drawn (one ending brings lenta back).
+    pub was_running: std::collections::HashSet<String>,
+    /// Play pressed: the game and when (until it shows up running).
+    pub launching: Option<(String, Instant)>,
     /// The Proton page.
     pub proton: crate::ui::proton::ProtonPage,
     /// A question before an action that can't be undone.
@@ -257,6 +272,10 @@ impl App {
         let c2 = ctx.clone();
         crate::input::spawn_gamepad(pad_tx, move || c2.request_repaint());
         let (scan_tx, scan_rx) = crossbeam_channel::unbounded();
+        let watch: std::sync::Arc<std::sync::Mutex<Vec<crate::running::Watch>>> =
+            Default::default();
+        let rctx = ctx.clone();
+        let running_shared = crate::running::spawn(watch.clone(), move || rctx.request_repaint());
         let music_ctx = ctx.clone();
         let mut app = App {
             images: Images::new(ctx.clone()),
@@ -284,6 +303,12 @@ impl App {
             sfx: crate::sfx::Sfx::new(),
             sounds: Default::default(),
             mods: crate::ui::modules::Mods::load(),
+            launch: crate::launch::Launch::load(),
+            start_seen: None,
+            running: running_shared,
+            watch,
+            was_running: Default::default(),
+            launching: None,
             apps: Vec::new(),
             scanning: false,
             scan_tx,
@@ -388,9 +413,22 @@ impl App {
                 .into_iter()
                 .partition(|g| g.steam_appid.is_none_or(|id| !hidden.contains(&id)));
             self.games = shown;
+            if let Ok(mut w) = self.watch.lock() {
+                *w = self
+                    .games
+                    .iter()
+                    .filter(|g| g.installed)
+                    .map(|g| crate::running::Watch {
+                        key: g.key.clone(),
+                        appid: g.steam_appid,
+                        dir: g.install_dir.clone(),
+                    })
+                    .collect();
+            }
             sources::sort(&mut self.games, self.cfg.sort);
             // Changes still waiting on Steam outlive the rescan.
             let pending = std::mem::take(&mut self.steam.pending);
+            let hooks = std::mem::take(&mut self.steam.hooks);
             let restart = self.steam.restart.take();
             let more = std::mem::take(&mut self.steam.more);
             let first = !s.last;
@@ -402,6 +440,7 @@ impl App {
                 };
             }
             self.steam.pending = pending;
+            self.steam.hooks = hooks;
             self.steam.restart = restart;
             // The quick pass has no account games yet: keep the last ones.
             if first && self.steam.more.is_empty() {
@@ -452,6 +491,11 @@ impl App {
     }
 
     pub fn play(&mut self, key: &str) {
+        // Running: Play is Close.
+        if self.is_running(key) {
+            self.ask_stop(key);
+            return;
+        }
         let Some(g) = self.game_by_key(key) else {
             return;
         };
@@ -462,8 +506,18 @@ impl App {
         } else {
             tr("installing")
         };
+        // The options as they should be, before the launcher starts it.
+        let key = g.key.clone();
+        self.start_sync(&key);
+        self.start_push(&key);
+        let Some(g) = self.game_by_key(&key) else {
+            return;
+        };
         match g.play() {
-            Ok(()) => self.toast(format!("{verb} {title}…")),
+            Ok(()) => {
+                self.launching = Some((key.clone(), Instant::now()));
+                self.toast(format!("{verb} {title}…"))
+            }
             Err(e) => self.toast(format!("{} {title}: {e}", tr("launch_failed"))),
         }
     }
@@ -914,7 +968,13 @@ impl App {
                 return vec![(Btn::Dpad, tr("scroll")), (Btn::B, tr("back"))];
             }
             let installed = self.game_by_key(&v.key).is_none_or(|g| g.installed);
-            let play = if installed { tr("play") } else { tr("install") };
+            let play = if self.is_running(&v.key) {
+                tr("stop_game")
+            } else if installed {
+                tr("play")
+            } else {
+                tr("install")
+            };
             if self.versions.ask.is_some() {
                 return vec![(Btn::A, tr("yes")), (Btn::B, tr("cancel"))];
             }
@@ -939,6 +999,9 @@ impl App {
                     (Btn::A, tr("art_take_btn")),
                     (Btn::B, tr("back")),
                 ];
+            }
+            if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Launch {
+                return self.launch_hints();
             }
             if v.focus == crate::ui::game_page::INSIDE && matches!(v.tab, Tab::Module(_)) {
                 return self.modview_hints(crate::ui::modules::Which::Game);
@@ -1283,6 +1346,7 @@ impl eframe::App for App {
                 self.draw_toast(ui, full);
             });
         self.mods_tick();
+        self.running_tick();
         self.sound_watch(&ctx);
         self.save_later();
         if self.animating() {

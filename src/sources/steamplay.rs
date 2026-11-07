@@ -11,7 +11,7 @@ use super::steam::{appinfo, roots, users};
 use crate::vdf::{self, Kv};
 
 /// The Steam install the launcher works with: the first one found.
-fn root() -> Option<PathBuf> {
+pub fn root() -> Option<PathBuf> {
     roots().into_iter().next()
 }
 
@@ -159,8 +159,12 @@ pub fn tools() -> Vec<Tool> {
     if let Some(h) = dirs::home_dir() {
         dirs.push(h.join(".steam/root/compatibilitytools.d"));
     }
-    dirs.push("/usr/share/steam/compatibilitytools.d".into());
-    dirs.push("/usr/local/share/steam/compatibilitytools.d".into());
+    dirs.push(crate::sandbox::system(
+        "/usr/share/steam/compatibilitytools.d",
+    ));
+    dirs.push(crate::sandbox::system(
+        "/usr/local/share/steam/compatibilitytools.d",
+    ));
     let mut custom: Vec<Tool> = Vec::new();
     let own = root.join("compatibilitytools.d").canonicalize().ok();
     for d in dirs {
@@ -279,16 +283,7 @@ pub fn mapping() -> HashMap<u32, String> {
 /// Is the Steam client running? (It rewrites config.vdf when it quits, so
 /// changes made meanwhile would be lost.)
 pub fn steam_running() -> bool {
-    let Ok(rd) = std::fs::read_dir("/proc") else {
-        return false;
-    };
-    rd.flatten().any(|e| {
-        e.file_name()
-            .to_string_lossy()
-            .bytes()
-            .all(|b| b.is_ascii_digit())
-            && std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim() == "steam")
-    })
+    crate::running::named("steam")
 }
 
 /// Set (Some) or clear (None) the tool of these games in config.vdf.

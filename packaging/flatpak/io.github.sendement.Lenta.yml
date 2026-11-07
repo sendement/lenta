@@ -1,0 +1,58 @@
+# Flatpak build of Lenta. Locally:
+#   flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.github.sendement.Lenta.yml
+# (run from the repository root; cargo-sources.json comes from
+# flatpak-cargo-generator.py over Cargo.lock).
+id: io.github.sendement.Lenta
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: lenta
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  # GPU, and gamepads (evdev under /dev/input)
+  - --device=all
+  # gamepads plugged in later are announced through udev
+  - --filesystem=/run/udev:ro
+  # Steam, Heroic and Lutris folders, game libraries on any drive; the
+  # launch hook Steam runs and settings shared with a native install
+  - --filesystem=host
+  # the host's programs (.desktop entries, icons) and modules in /usr/share
+  - --filesystem=host-os:ro
+  - --socket=pulseaudio
+  # store pages, art, achievements, sound packs
+  - --share=network
+  # games, launchers and modules run on the host; running games are
+  # looked for there
+  - --talk-name=org.freedesktop.Flatpak
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+
+modules:
+  - name: lenta
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/lenta/cargo
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      - cargo --offline build --release --locked
+      - install -Dm755 target/release/lenta /app/bin/lenta
+      - install -Dm644 packaging/flatpak/io.github.sendement.Lenta.desktop /app/share/applications/io.github.sendement.Lenta.desktop
+      - install -Dm644 packaging/lenta.svg /app/share/icons/hicolor/scalable/apps/io.github.sendement.Lenta.svg
+      - install -Dm644 packaging/flatpak/io.github.sendement.Lenta.metainfo.xml /app/share/metainfo/io.github.sendement.Lenta.metainfo.xml
+    sources:
+      # The working tree; a Flathub build points at a git tag instead.
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - build-dir
+          - .flatpak-builder
+          - packaging/arch
+      - cargo-sources.json

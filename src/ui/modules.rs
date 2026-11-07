@@ -170,7 +170,42 @@ impl App {
             "install_dir": g.install_dir,
             "prefix": g.prefix,
             "compat_tool": g.compat_id.and_then(|id| self.steam.mapping.get(&id).cloned()),
+            "launch": self.launch_state(g),
         })
+    }
+
+    /// Where a game's start stands for the modules: "none" (nothing
+    /// added), "ready", or "pending" (Steam must be restarted first).
+    fn launch_state(&self, g: &Game) -> &'static str {
+        if !self.launch.wants(&g.key) {
+            return "none";
+        }
+        match g.steam_appid {
+            Some(id) if self.steam.hooks.iter().any(|h| h.appid == id) => "pending",
+            Some(id) if !crate::launch::hooked(id, &g.key) => "pending",
+            _ => "ready",
+        }
+    }
+
+    /// A module changed a game's start.
+    fn mod_launch(&mut self, module: &str, key: &str, part: Option<crate::launch::Part>) {
+        self.launch.set_part(key, module, part);
+        self.start_push(key);
+        let Some(g) = self.game_by_key(key).cloned() else {
+            return;
+        };
+        // The module sees the new state on its next question.
+        let state = self.launch_state(&g);
+        for w in [Which::Page, Which::Over, Which::Game] {
+            if let Some(v) = self.view_mut(w)
+                && v.game_key.as_deref() == Some(key)
+                && let Some(gj) = v.game.as_mut()
+            {
+                gj["launch"] = json!(state);
+                // Its page was drawn with the old state: ask again.
+                v.fetch();
+            }
+        }
     }
 
     /// A module's icon: its picture, one of ours by name, or the modules'.
@@ -272,17 +307,24 @@ impl App {
                     Which::Over => true,
                     Which::Game => tab_id.as_deref() == Some(v.module.as_str()),
                 };
-            let toast = match self.module_of(&v).cloned() {
+            let said = match self.module_of(&v).cloned() {
                 Some(m) => v.pump(&m, shown),
-                None => None,
+                None => Default::default(),
             };
+            let module = v.module.clone();
             if shown && let Some(d) = v.refresh_in() {
                 soon = Some(soon.map_or(d, |s| s.min(d)));
             }
             busy |= v.busy();
             *self.slot(w) = Some(v);
-            if let Some(t) = toast {
+            if let Some(t) = said.toast {
                 self.toast(t);
+            }
+            if let Some((key, part)) = said.launch {
+                self.mod_launch(&module, &key, part);
+            }
+            if said.restart_steam {
+                self.restart_steam();
             }
         }
         if busy {

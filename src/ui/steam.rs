@@ -32,6 +32,9 @@ pub struct SteamData {
     /// Tool changes waiting for Steam to close (it rewrites its config
     /// when it quits).
     pub pending: Vec<(u32, Option<String>)>,
+    /// Games whose Steam launch options get (true) or lose lenta's start
+    /// script, waiting for Steam to close: appid, game key.
+    pub hooks: Vec<crate::launch::SteamWrite>,
     /// Steam being restarted to apply them: the outcome comes here.
     pub restart: Option<Receiver<Result<(), String>>>,
     /// Why the account's games couldn't be read.
@@ -387,12 +390,18 @@ impl App {
 
     /// Write the waiting changes if Steam is closed; true when written.
     pub fn apply_pending_tools(&mut self, say: bool) -> bool {
-        if self.steam.pending.is_empty() || steamplay::steam_running() {
+        if (self.steam.pending.is_empty() && self.steam.hooks.is_empty())
+            || steamplay::steam_running()
+        {
             return false;
         }
-        match steamplay::set_tools(&self.steam.pending) {
+        let r = steamplay::set_tools(&self.steam.pending)
+            .and_then(|()| crate::launch::write_steam(&self.steam.hooks));
+        match r {
             Ok(()) => {
                 self.steam.pending.clear();
+                let hooks = std::mem::take(&mut self.steam.hooks);
+                self.steam_written(&hooks);
                 if say {
                     self.toast(tr("tool_saved"));
                 }
@@ -411,6 +420,7 @@ impl App {
             return;
         }
         let pending = self.steam.pending.clone();
+        let hooks = self.steam.hooks.clone();
         let (tx, rx) = crossbeam_channel::bounded(1);
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
@@ -426,6 +436,7 @@ impl App {
                 // Let it finish writing its files.
                 std::thread::sleep(Duration::from_secs(1));
                 steamplay::set_tools(&pending)?;
+                crate::launch::write_steam(&hooks)?;
                 crate::game::run_first(&crate::sources::steam::steam_run(&["-silent"]))
             })();
             let _ = tx.send(r);
@@ -448,6 +459,8 @@ impl App {
         match r {
             Ok(()) => {
                 self.steam.pending.clear();
+                let hooks = std::mem::take(&mut self.steam.hooks);
+                self.steam_written(&hooks);
                 self.toast(tr("tool_saved"));
             }
             Err(e) => self.toast(format!("{}: {e}", tr("tool_failed"))),

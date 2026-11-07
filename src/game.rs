@@ -112,8 +112,9 @@ pub fn spawn(prog: &str, args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     let mut cmd = Command::new(prog);
-    cmd.args(args)
-        .stdin(Stdio::null())
+    cmd.args(args);
+    let mut cmd = crate::sandbox::host(cmd);
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .process_group(0);
@@ -126,8 +127,7 @@ pub fn spawn(prog: &str, args: &[String]) -> Result<(), String> {
 }
 
 pub fn has_program(name: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
+    crate::sandbox::has_program(name)
 }
 
 /// "2024-05-01T12:34:56.000Z" → unix seconds.

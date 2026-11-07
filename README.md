@@ -105,6 +105,17 @@ through the instance and kept in `~/.cache/lenta/music`.
 Downloads (store pages, art, achievement icons) are kept in `~/.cache/lenta`.
 Settings live in `~/.config/lenta/config.toml`.
 
+### Launch options
+
+A game's page has a Launch tab with its launch options, kept in step with
+Steam's and Lutris's: whoever changed them last wins. A change made in Steam
+or Lutris is taken in; one made in lenta is written there. Lutris reads its
+game file at every start, so that's immediate. Steam holds launch options in
+memory while it runs, so lenta writes them while it's closed, and until then
+starts the game with lenta's options through a small script at the front of
+the game's Steam options (once; Steam has to be restarted for that the first
+time). A copy of Steam's file is kept as `localconfig.vdf.lenta-backup`.
+
 ### Modules
 
 Other programs can add to lenta: a section of their own (a package with
@@ -116,8 +127,9 @@ them, so they work with the pad. Packages put modules in
 removing a package takes its section away. In **Modules** each can be turned
 off and shown as a section or only there. See [docs/modules.md](docs/modules.md)
 and the examples: `examples/modules/system` (Wi-Fi, Bluetooth and About, with
-a side panel of its own) and `examples/modules/demo` (every kind of item and
-a game tab).
+a side panel of its own), `examples/modules/mangohud` (common settings in
+Modules, each game's own on its page, applied to the game's start) and
+`examples/modules/demo` (every kind of item and a game tab).
 
 ## Controls
 
@@ -135,11 +147,29 @@ a game tab).
 
 The pad is ignored while another window (a game) has focus.
 
+## Installing
+
+**Flatpak**, from Lenta's own repository (updates come with
+`flatpak update` or Discover):
+
+    flatpak install --user https://sendement.github.io/lenta/lenta.flatpakref
+
+The Flatpak sees your whole home and drives (Steam libraries live
+anywhere), keeps its settings in the same `~/.config/lenta` and
+`~/.local/share/lenta` as a native install, and starts games, launchers and
+modules on the host through `flatpak-spawn`.
+
+**Arch Linux**: `packaging/arch/PKGBUILD`, or the `.pkg.tar.zst` attached to
+each release:
+
+    sudo pacman -U lenta-*-x86_64.pkg.tar.zst
+
 ## Building
 
     cargo build --release
-    ./target/release/lenta           # the launcher
-    ./target/release/lenta --list    # what the sources found, in the terminal
+    ./target/release/lenta              # the launcher
+    ./target/release/lenta --list       # what the sources found, in the terminal
+    ./target/release/lenta --diagnose   # folders, games, processes seen (Flatpak too)
 
 Screenshots of every screen, offscreen, on this machine's games:
 

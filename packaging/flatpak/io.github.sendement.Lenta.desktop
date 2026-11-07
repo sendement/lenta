@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Lenta
+GenericName=Game Launcher
+GenericName[ru]=Игровой лаунчер
+Comment=Gamepad-first launcher for Steam, Heroic and Lutris games
+Comment[ru]=Лаунчер игр Steam, Heroic и Lutris для геймпада
+Exec=lenta
+Icon=io.github.sendement.Lenta
+Terminal=false
+Categories=Game;
+Keywords=games;launcher;steam;heroic;lutris;gamepad;controller;

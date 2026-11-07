@@ -47,9 +47,32 @@ fn cache_dir(root: &Path, flatpak: bool, sub: &str) -> Vec<PathBuf> {
     v
 }
 
-/// The game's exe and Wine prefix from its YAML config (only the `game:`
-/// section's two keys are needed, so no YAML parser).
-fn game_config(root: &Path, flatpak: bool, name: &str) -> (Option<PathBuf>, Option<PathBuf>) {
+/// Where a game's YAML config is (by its id in pga.db).
+pub fn config_file(id: i64) -> Option<PathBuf> {
+    for (root, flatpak) in roots() {
+        let Ok(db) = rusqlite::Connection::open_with_flags(
+            root.join("pga.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) else {
+            continue;
+        };
+        let Ok(name) = db.query_row("SELECT configpath FROM games WHERE id = ?1", [id], |r| {
+            r.get::<_, Option<String>>(0)
+        }) else {
+            continue;
+        };
+        let Some(name) = name else { continue };
+        if let Some(p) = config_places(&root, flatpak, &name)
+            .into_iter()
+            .find(|p| p.is_file())
+        {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn config_places(root: &Path, flatpak: bool, name: &str) -> Vec<PathBuf> {
     let mut places = vec![root.join(format!("games/{name}.yml"))];
     let conf = if flatpak {
         dirs::home_dir().map(|h| h.join(".var/app/net.lutris.Lutris/config/lutris"))
@@ -57,6 +80,13 @@ fn game_config(root: &Path, flatpak: bool, name: &str) -> (Option<PathBuf>, Opti
         dirs::config_dir().map(|c| c.join("lutris"))
     };
     places.extend(conf.map(|c| c.join(format!("games/{name}.yml"))));
+    places
+}
+
+/// The game's exe and Wine prefix from its YAML config (only the `game:`
+/// section's two keys are needed, so no YAML parser).
+fn game_config(root: &Path, flatpak: bool, name: &str) -> (Option<PathBuf>, Option<PathBuf>) {
+    let places = config_places(root, flatpak, name);
     let Some(text) = places.iter().find_map(|p| std::fs::read_to_string(p).ok()) else {
         return (None, None);
     };

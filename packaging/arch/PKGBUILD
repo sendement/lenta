@@ -1,0 +1,68 @@
+# Maintainer: Sendem <18467008+sendement@users.noreply.github.com>
+pkgname=lenta
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Gamepad-first game launcher: Steam, Heroic and Lutris games on a ribbon of cards"
+arch=('x86_64')
+url="https://github.com/sendement/lenta"
+license=('MIT')
+depends=(
+  'systemd-libs'     # libudev, gamepad hotplug
+  'gcc-libs'
+  'glibc'
+  # loaded at runtime by winit/glow
+  'libxkbcommon'
+  'wayland'
+  'libglvnd'
+  'alsa-lib'         # sounds and music (PipeWire/Pulse through their ALSA plugins)
+  'fontconfig'
+  'hicolor-icon-theme'
+  'xdg-utils'
+)
+optdepends=(
+  'steam: Steam games'
+  'lutris: Lutris games'
+  'heroic-games-launcher: Epic, GOG and Amazon games'
+  'mangohud: the MangoHud example module'
+  'python: the example modules'
+  'networkmanager: Wi-Fi in the System example module'
+  'bluez-utils: Bluetooth in the System example module'
+  'noto-fonts-cjk: Chinese, Japanese and Korean game names'
+)
+makedepends=('cargo')
+# Rust links with lld here; GCC LTO objects from C build scripts break that.
+options=('!lto')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # Keep the registry inside $srcdir so --remap-path-prefix hides it.
+  export CARGO_HOME="$srcdir/cargo-home"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export CARGO_HOME="$srcdir/cargo-home"
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build"
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export CARGO_HOME="$srcdir/cargo-home"
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build"
+  LENTA_DRY_RUN=1 cargo test --frozen --release
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/lenta "$pkgdir/usr/bin/lenta"
+  install -Dm644 packaging/lenta.desktop "$pkgdir/usr/share/applications/lenta.desktop"
+  install -Dm644 packaging/lenta.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/lenta.svg"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 docs/modules.md "$pkgdir/usr/share/doc/$pkgname/modules.md"
+  cp -r examples/modules "$pkgdir/usr/share/doc/$pkgname/examples"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

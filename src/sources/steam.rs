@@ -302,15 +302,18 @@ fn looks_like_tool(name: &str) -> bool {
 
 fn steam_cmd(root: &Path, url: String) -> Vec<Vec<String>> {
     let mut out = Vec::new();
+    // -silent: a Steam that isn't running yet starts in the tray, without
+    // its window over everything (a running one ignores it).
     if flatpak_root(root) {
         out.push(vec![
             "flatpak".into(),
             "run".into(),
             "com.valvesoftware.Steam".into(),
+            "-silent".into(),
             url.clone(),
         ]);
     }
-    out.push(vec!["steam".into(), url.clone()]);
+    out.push(vec!["steam".into(), "-silent".into(), url.clone()]);
     out.push(vec!["xdg-open".into(), url]);
     out
 }

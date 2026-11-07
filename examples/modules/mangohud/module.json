@@ -1,0 +1,13 @@
+{
+  "id": "mangohud",
+  "name": "MangoHud",
+  "description": {
+    "en": "FPS, temperatures and load over games: common settings here, each game's own on its page.",
+    "ru": "FPS, температуры и нагрузка поверх игр: общие настройки здесь, свои для каждой игры — на её странице."
+  },
+  "version": "1.0",
+  "exec": ["python3", "mangohud.py"],
+  "icon": "icon.png",
+  "show": "menu",
+  "game": { "label": "MangoHud", "sources": ["steam"] }
+}

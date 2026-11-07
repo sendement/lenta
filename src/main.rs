@@ -11,11 +11,14 @@ mod i18n;
 mod images;
 mod input;
 mod keyboard;
+mod launch;
 mod maint;
 mod modules;
 mod music;
 mod net;
 mod protonup;
+mod running;
+mod sandbox;
 mod sfx;
 mod sgdb;
 mod sources;
@@ -27,6 +30,7 @@ mod vdf;
 mod shots;
 
 fn main() -> eframe::Result {
+    sandbox::fix_env();
     // For development: one app's appinfo record.
     if std::env::args().nth(1).as_deref() == Some("--appinfo")
         && let Some(id) = std::env::args().nth(2).and_then(|a| a.parse().ok())
@@ -35,6 +39,12 @@ fn main() -> eframe::Result {
             let all = sources::steam::appinfo(&root, &[id].into_iter().collect());
             println!("{:#?}", all.get(&id));
         }
+        return Ok(());
+    }
+    // What it sees, without a window (for bug reports, and checking the
+    // Flatpak build): --diagnose.
+    if std::env::args().nth(1).as_deref() == Some("--diagnose") {
+        diagnose();
         return Ok(());
     }
     // Rolling back from the command line: --versions APP, --install APP N
@@ -165,7 +175,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lenta")
-            .with_app_id("lenta")
+            // The window matches its .desktop file (and icon) by this.
+            .with_app_id(std::env::var("FLATPAK_ID").unwrap_or_else(|_| "lenta".into()))
             .with_inner_size([1440.0, 860.0])
             .with_min_inner_size([800.0, 500.0])
             .with_fullscreen(cfg.fullscreen),
@@ -282,4 +293,26 @@ fn downgrade_cli(cmd: &str, app: &str, rest: &[String]) -> eframe::Result {
         }
         Err(e) => fail(e),
     }
+}
+
+fn diagnose() {
+    println!("lenta {}", env!("CARGO_PKG_VERSION"));
+    println!("flatpak: {}", sandbox::flatpak());
+    println!("data: {:?}", dirs::data_dir());
+    println!("config: {:?}", dirs::config_dir());
+    println!("steam roots: {:?}", sources::steam::roots());
+    println!("steam games: {}", sources::steam::games().len());
+    println!("heroic games: {}", sources::heroic::games().len());
+    println!("lutris games: {}", sources::lutris::games().len());
+    let ps = running::procs();
+    println!("processes seen: {}", ps.len());
+    println!("steam running: {}", sources::steamplay::steam_running());
+    println!("steam on PATH: {}", game::has_program("steam"));
+    println!(
+        "modules: {:?}",
+        modules::scan(&modules::dirs())
+            .iter()
+            .map(|m| m.id.clone())
+            .collect::<Vec<_>>()
+    );
 }

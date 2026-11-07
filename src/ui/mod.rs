@@ -16,6 +16,7 @@ pub mod settings;
 pub mod sgdb;
 pub mod sidebar;
 pub mod sounds;
+pub mod start;
 pub mod steam;
 pub mod system;
 pub mod versions;

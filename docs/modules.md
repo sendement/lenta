@@ -94,6 +94,8 @@ Answers (any of these together):
 {"back": true}                           // back a page
 {"error": "lsfg-vk isn't installed"}     // shown above the page
 {"refresh": 5000}                        // ask for this page again in 5 s (while it's on screen)
+{"launch": {"env": {…}, "wrap": ["mangohud"]}} // add to the game's start (see below)
+{"restart_steam": true}                  // close Steam, write waiting changes, start it again
 {"nav": [ … ]}                           // the module's own side panel (see below)
 ```
 
@@ -125,6 +127,31 @@ Every item may have `"hint"` (a second, smaller line) and `"disabled": true`.
 - `danger` buttons ask first.
 - `link` opens the module's page by name; B goes back.
 
+## Changing how a game starts
+
+On a game's tab (or with `"game": "<key>"` from anywhere) a module can add
+environment variables and wrapper programs to the game's start:
+
+```json
+{"launch": {"env": {"MANGOHUD_CONFIGFILE": "/…/elden.conf"}, "wrap": ["mangohud"]}}
+{"launch": {"game": "steam:1245620"}}     // nothing to add any more
+```
+
+Steam starts its games itself, so lenta puts a small script at the front of
+the game's Steam launch options, once:
+`~/.local/share/lenta/bin/lenta-run <game> <yours> --lenta-cmd %command% --lenta-end <yours>`
+(your own options stay where they were around the game). The script reads
+`~/.local/share/lenta/launch/<game>.sh`, which lenta rewrites whenever a
+module changes its part, so later changes take effect on the next start
+without touching Steam. Several modules can add to the same game. The same
+script carries launch options changed in lenta's Launch tab while Steam runs.
+
+Steam keeps launch options in memory while it runs, so the first time lenta
+waits until Steam is closed, or restarts it when asked (`restart_steam`).
+The game's JSON carries `"launch": "none" | "pending" | "ready"` so the
+module can say so. When the last part goes, the word is taken out again.
+For now this is for Steam games (`"sources": ["steam"]`).
+
 ## A side panel of its own
 
 A module with several parts (Wi-Fi, Bluetooth, About…) answers with `nav`:
@@ -147,7 +174,11 @@ above.
 
 ## Trying it
 
-Two examples:
+Three examples:
+
+- `examples/modules/mangohud` lives in Modules (its common settings) and on
+  Steam games' pages: on or off per game, the common settings or its own,
+  a try-out on `vkcube`.
 
 - `examples/modules/demo` shows every item and a game tab.
 - `examples/modules/system` is a settings section: Wi-Fi (NetworkManager:

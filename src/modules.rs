@@ -82,8 +82,11 @@ pub fn dirs() -> Vec<(PathBuf, bool)> {
     if let Some(d) = ::dirs::data_dir() {
         v.push((d.join("lenta/modules"), false));
     }
-    v.push(("/usr/local/share/lenta/modules".into(), true));
-    v.push(("/usr/share/lenta/modules".into(), true));
+    v.push((
+        crate::sandbox::system("/usr/local/share/lenta/modules"),
+        true,
+    ));
+    v.push((crate::sandbox::system("/usr/share/lenta/modules"), true));
     v
 }
 
@@ -237,13 +240,18 @@ pub fn run_in(m: &Module, req: &Value, data: &Path) -> Result<Value, String> {
             m.exec[0].clone().into()
         }
     };
-    let mut ch = Command::new(prog)
-        .args(&m.exec[1..])
+    // Modules are the host's programs: inside Flatpak they run there.
+    let mut cmd = Command::new(prog);
+    cmd.args(&m.exec[1..])
         .current_dir(&m.dir)
         .env("LENTA_LANG", if crate::i18n::ru() { "ru" } else { "en" })
         .env("LENTA_MODULE_DIR", &m.dir)
         .env("LENTA_MODULE_DATA", data)
-        .env("LENTA_VERSION", env!("CARGO_PKG_VERSION"))
+        .env("LENTA_VERSION", env!("CARGO_PKG_VERSION"));
+    if let Some(v) = std::env::var_os("LENTA_DRY_RUN") {
+        cmd.env("LENTA_DRY_RUN", v);
+    }
+    let mut ch = crate::sandbox::host(cmd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -486,6 +494,15 @@ pub fn num_value(v: f64, step: f64) -> Value {
     }
 }
 
+/// What an answer asks of the launcher.
+#[derive(Default, Debug)]
+pub struct Said {
+    pub toast: Option<String>,
+    /// A game's start changed: its key and the module's part (None: gone).
+    pub launch: Option<(String, Option<crate::launch::Part>)>,
+    pub restart_steam: bool,
+}
+
 /// A section in a module's own side panel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NavItem {
@@ -679,9 +696,10 @@ impl ModView {
         self.running.is_some() || !self.queue.is_empty()
     }
 
-    /// Take an answer, ask the next question; a word for the user, if the
-    /// module has one.
-    pub fn pump(&mut self, m: &Module, shown: bool) -> Option<String> {
+    /// Take an answer, ask the next question; what the module asks of the
+    /// launcher, if anything.
+    pub fn pump(&mut self, m: &Module, shown: bool) -> Said {
+        let mut said = Said::default();
         let mut toast = None;
         if let Some((page, op, rx)) = &self.running
             && let Ok(r) = rx.try_recv()
@@ -709,6 +727,37 @@ impl ModView {
                             .and_then(Value::as_u64)
                             .map(|ms| Instant::now() + Duration::from_millis(ms.max(300)));
                     }
+                    // A change to a game's start (null: its part gone).
+                    if let Some(l) = v.get("launch") {
+                        let key = l
+                            .get("game")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .or_else(|| self.game_key.clone());
+                        if let Some(key) = key {
+                            // Nothing to add (null, or no env/wrap): the part goes.
+                            let part = l.as_object().map(|_| crate::launch::Part {
+                                env: l
+                                    .get("env")
+                                    .and_then(Value::as_object)
+                                    .map(|e| e.iter().map(|(k, v)| (k.clone(), show(v))).collect())
+                                    .unwrap_or_default(),
+                                wrap: l
+                                    .get("wrap")
+                                    .and_then(Value::as_array)
+                                    .map(|a| {
+                                        a.iter()
+                                            .filter_map(|w| w.as_str().map(str::to_string))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                            });
+                            let part = part.filter(|p| !p.env.is_empty() || !p.wrap.is_empty());
+                            said.launch = Some((key, part));
+                        }
+                    }
+                    said.restart_steam =
+                        v.get("restart_steam").and_then(Value::as_bool) == Some(true);
                     toast = v
                         .get("toast")
                         .and_then(Value::as_str)
@@ -758,7 +807,8 @@ impl ModView {
             self.since = Instant::now();
             self.running = Some((page, op, call(m, q)));
         }
-        toast
+        said.toast = toast;
+        said
     }
 
     /// The choice on something that can be chosen.

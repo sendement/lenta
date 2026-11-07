@@ -930,3 +930,255 @@ fn system_module() {
     h.state_mut().handle(Action::Back);
     assert_eq!(h.state().page, Page::Home);
 }
+
+/// MangoHud: its hub in Modules (a window), its tab on a game's page;
+/// turned on for a game, the launcher keeps the game's start part.
+#[test]
+#[ignore]
+fn mangohud_module() {
+    use crate::app::{Page, Tab};
+    use crate::modules::Kind;
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    let ex = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/modules");
+    h.state_mut().mods = crate::ui::modules::Mods::load_from(vec![(only(&ex, "mangohud"), false)]);
+    // Kept to Modules: no section of its own.
+    assert!(
+        !h.state()
+            .pages()
+            .iter()
+            .any(|p| matches!(p, Page::Module(_)))
+    );
+    h.state_mut().go(Page::Modules);
+    h.state_mut().handle(Action::Accept);
+    let wait = |h: &mut Harness<'static, App>, w: &dyn Fn(&App) -> bool| {
+        for _ in 0..300 {
+            h.step();
+            if w(h.state()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the module didn't answer");
+    };
+    wait(&mut h, &|a: &App| {
+        a.mods
+            .over
+            .as_ref()
+            .is_some_and(|v| v.page.is_some() && !v.busy())
+    });
+    snap(&mut h, &dir, "mangohud-hub");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().mods.over.is_none());
+    // A Steam game's page: the MangoHud tab.
+    let Some(key) = h
+        .state()
+        .games
+        .iter()
+        .find(|g| g.steam_appid.is_some())
+        .map(|g| g.key.clone())
+    else {
+        return;
+    };
+    h.state_mut().go(Page::Home);
+    h.state_mut().open_game(key.clone());
+    let g = h.state().game_by_key(&key).unwrap().clone();
+    let tabs = h.state().tabs_of(&g);
+    let i = tabs
+        .iter()
+        .position(|t| matches!(t, Tab::Module(_)))
+        .expect("MangoHud tab");
+    {
+        let v = h.state_mut().game.as_mut().unwrap();
+        v.tab = tabs[i];
+        v.focus = i + 1;
+    }
+    h.state_mut().handle(Action::Down);
+    wait(&mut h, &|a: &App| {
+        a.mods
+            .game
+            .as_ref()
+            .is_some_and(|v| v.page.is_some() && !v.busy())
+    });
+    // On for this game: the launcher holds its part.
+    h.state_mut().handle(Action::Accept);
+    wait(&mut h, &|a: &App| {
+        a.mods
+            .game
+            .as_ref()
+            .is_some_and(|v| !v.busy() && v.page.as_ref().is_some_and(|p| p.items.len() > 1))
+    });
+    assert!(
+        h.state().launch.wants(&key),
+        "the game's start has MangoHud"
+    );
+    // Its own settings.
+    h.state_mut().handle(Action::Down);
+    let at = h
+        .state()
+        .mods
+        .game
+        .as_ref()
+        .unwrap()
+        .page
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .position(|it| it.id == "own");
+    if let Some(at) = at {
+        h.state_mut().mods.game.as_mut().unwrap().sel = at;
+        h.state_mut().handle(Action::Right);
+        wait(&mut h, &|a: &App| {
+            a.mods.game.as_ref().is_some_and(|v| {
+                !v.busy()
+                    && v.page
+                        .as_ref()
+                        .is_some_and(|p| p.items.iter().any(|i| i.id == "g.style"))
+            })
+        });
+    }
+    snap(&mut h, &dir, "mangohud-game");
+    // Off again: nothing kept for the game.
+    h.state_mut().mods.game.as_mut().unwrap().sel = 0;
+    h.state_mut().handle(Action::Accept);
+    wait(&mut h, &|a: &App| {
+        a.mods.game.as_ref().is_some_and(|v| !v.busy())
+    });
+    assert!(!h.state().launch.wants(&key));
+    let first = h
+        .state()
+        .mods
+        .game
+        .as_ref()
+        .unwrap()
+        .page
+        .as_ref()
+        .unwrap()
+        .items[0]
+        .kind
+        .clone();
+    assert_eq!(first, Kind::Toggle(false));
+}
+
+/// The Launch tab: the options as Steam (or Lutris) has them, changed
+/// here. A dry run: nothing is written anywhere.
+#[test]
+#[ignore]
+fn launch_options() {
+    use crate::app::Tab;
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    let keys: Vec<String> = h
+        .state()
+        .games
+        .iter()
+        .filter(|g| g.key.starts_with("steam:") || g.key.starts_with("lutris:"))
+        .map(|g| g.key.clone())
+        .collect();
+    let steam = keys.iter().find(|k| k.starts_with("steam:")).cloned();
+    let lutris = keys.iter().find(|k| k.starts_with("lutris:")).cloned();
+    for (key, name) in [(steam, "launch-steam"), (lutris, "launch-lutris")] {
+        let Some(key) = key else { continue };
+        h.state_mut().open_game(key.clone());
+        let g = h.state().game_by_key(&key).unwrap().clone();
+        let tabs = h.state().tabs_of(&g);
+        let i = tabs
+            .iter()
+            .position(|t| *t == Tab::Launch)
+            .expect("Launch tab");
+        {
+            let v = h.state_mut().game.as_mut().unwrap();
+            v.tab = Tab::Launch;
+            v.focus = i + 1;
+        }
+        h.state_mut().handle(Action::Down);
+        settle(&mut h, 3);
+        let before = h.state().launch.get(&key).and_then(|s| s.line.clone());
+        assert!(before.is_some(), "looked at the launcher's options");
+        // Typed on the keyboard: " -novid" at the end.
+        h.state_mut().handle(Action::Accept);
+        assert!(h.state().osk.is_some());
+        h.input_mut()
+            .events
+            .push(egui::Event::Text(" -novid".into()));
+        settle(&mut h, 2);
+        h.state_mut().handle(Action::Menu);
+        assert!(h.state().osk.is_none());
+        let after = h
+            .state()
+            .launch
+            .get(&key)
+            .and_then(|s| s.line.clone())
+            .unwrap();
+        assert!(after.ends_with("-novid"), "{after:?}");
+        snap(&mut h, &dir, name);
+        h.state_mut().game = None;
+    }
+}
+
+/// A game running: Play is Close (asks first); Steam updating it: the
+/// button fills as it goes. The state is put in by hand (nothing runs).
+#[test]
+#[ignore]
+fn game_running() {
+    use crate::running::{Status, Work};
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    let Some(key) = h
+        .state()
+        .games
+        .iter()
+        .find(|g| g.key.starts_with("steam:"))
+        .map(|g| g.key.clone())
+    else {
+        return;
+    };
+    // Off the watcher's line: only what's put in here.
+    let st: crate::running::Shared = Default::default();
+    h.state_mut().running = st.clone();
+    h.state_mut().open_game(key.clone());
+    st.lock().unwrap().running.insert(key.clone());
+    snap(&mut h, &dir, "game-running");
+    assert!(
+        h.state()
+            .hint_items()
+            .iter()
+            .any(|(_, t)| *t == "Закрыть" || *t == "Close")
+    );
+    h.state_mut().handle(Action::Accept);
+    assert!(h.state().confirm.is_some(), "asks before closing");
+    h.state_mut().handle(Action::Back);
+    // Ended: the next frame looks again.
+    *st.lock().unwrap() = Status::default();
+    st.lock().unwrap().work.insert(
+        key.clone(),
+        Work::Updating {
+            done: 45,
+            total: 100,
+        },
+    );
+    snap(&mut h, &dir, "game-updating");
+    assert!(h.state().was_running.is_empty());
+}

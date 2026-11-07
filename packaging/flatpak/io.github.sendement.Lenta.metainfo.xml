@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.sendement.Lenta</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Lenta</name>
+  <summary>Game launcher made for gamepads</summary>
+  <summary xml:lang="ru">Игровой лаунчер для геймпада</summary>
+  <developer id="io.github.sendement">
+    <name>Sendem</name>
+  </developer>
+  <description>
+    <p>
+      Lenta puts the games of Steam, Heroic and Lutris on one ribbon of cards,
+      fully usable with a gamepad as well as the keyboard and mouse.
+    </p>
+    <ul>
+      <li>A ribbon of covers or wide capsules with tilt, reflection and glow, the selected game's art behind it</li>
+      <li>Game pages with the store description, achievements, screenshots and play time</li>
+      <li>Library tabs per launcher and own collections across all of them, plain or by rules</li>
+      <li>Launch options kept in step with Steam and Lutris</li>
+      <li>Running games shown on the Play button, closed from the pad; Steam's updates shown with their progress</li>
+      <li>Proton versions per game, art from SteamGridDB, older game versions from Steam</li>
+      <li>External modules: own sections and per-game settings (a MangoHud example included)</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.sendement.Lenta.desktop</launchable>
+  <url type="homepage">https://github.com/sendement/lenta</url>
+  <url type="bugtracker">https://github.com/sendement/lenta/issues</url>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <supports>
+    <control>gamepad</control>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-07"/>
+  </releases>
+</component>

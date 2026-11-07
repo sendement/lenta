@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2f45"/>
+      <stop offset="1" stop-color="#141724"/>
+    </linearGradient>
+    <linearGradient id="hot" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a5c"/>
+      <stop offset="1" stop-color="#e2366f"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b6385"/>
+      <stop offset="1" stop-color="#3a4060"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <!-- the ribbon: cards fading off to the sides, the chosen one in front -->
+  <rect x="14" y="44" width="22" height="34" rx="5" fill="url(#side)" opacity=".55"/>
+  <rect x="92" y="44" width="22" height="34" rx="5" fill="url(#side)" opacity=".55"/>
+  <rect x="28" y="38" width="26" height="44" rx="6" fill="url(#side)"/>
+  <rect x="74" y="38" width="26" height="44" rx="6" fill="url(#side)"/>
+  <rect x="44" y="28" width="40" height="60" rx="8" fill="url(#hot)"/>
+  <path d="M58 48 L58 68 L73 58 Z" fill="#fff" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+  <!-- its reflection -->
+  <rect x="44" y="92" width="40" height="10" rx="4" fill="url(#hot)" opacity=".25"/>
+</svg>
