@@ -264,6 +264,51 @@ impl State {
             .unwrap_or_default()
     }
 
+    /// Remember a manifest seen on SteamDB; true if it's new (or got a date).
+    pub fn add_steamdb(&mut self, depot: &str, manifest: &str, when: i64) -> bool {
+        let d = self.obj("steamdb");
+        let m = d.entry(depot.to_string()).or_insert_with(|| json!({}));
+        if !m.is_object() {
+            *m = json!({});
+        }
+        let m = m.as_object_mut().unwrap();
+        let old = m.get(manifest).and_then(Value::as_i64);
+        if old == Some(when) || (old.is_some() && when == 0) {
+            return false;
+        }
+        m.insert(
+            manifest.to_string(),
+            json!(if when != 0 { when } else { old.unwrap_or(0) }),
+        );
+        true
+    }
+
+    /// Remember a build from SteamDB's patch notes; true if it's new.
+    pub fn add_build(&mut self, app: &str, buildid: i64, when: i64, title: &str) -> bool {
+        let b = self.obj("builds");
+        let a = b.entry(app.to_string()).or_insert_with(|| json!({}));
+        if !a.is_object() {
+            *a = json!({});
+        }
+        let a = a.as_object_mut().unwrap();
+        let key = buildid.to_string();
+        let old = a.get(&key).cloned().unwrap_or(json!({}));
+        let new = json!({
+            "time": if when != 0 { when } else { old.get("time").and_then(Value::as_i64).unwrap_or(0) },
+            "title": if !title.is_empty() { title } else { old.get("title").and_then(Value::as_str).unwrap_or("") },
+        });
+        if a.get(&key) == Some(&new) {
+            return false;
+        }
+        a.insert(key, new);
+        true
+    }
+
+    pub fn mark_steamdb_prompted(&mut self, app: &str) {
+        self.obj("steamdb_prompted")
+            .insert(app.to_string(), json!(now()));
+    }
+
     // ---------------------------------------------------- patch notes cache
 
     /// Cached notes if younger than `max_age` seconds: (time, version, title).
@@ -294,5 +339,26 @@ impl State {
             .collect();
         self.obj("news")
             .insert(app.to_string(), json!({"fetched": now(), "items": items}));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// As steam-downgrader keeps them: a date only fills in, never wipes.
+    #[test]
+    fn steamdb_and_builds_added() {
+        let mut s = State::default();
+        assert!(s.add_steamdb("11", "123", 0));
+        assert!(!s.add_steamdb("11", "123", 0));
+        assert!(s.add_steamdb("11", "123", 500));
+        assert!(!s.add_steamdb("11", "123", 0));
+        assert_eq!(s.steamdb("11"), vec![("123".to_string(), 500)]);
+        assert!(s.add_build("7", 900, 100, "Hotfix"));
+        assert!(!s.add_build("7", 900, 0, ""));
+        assert_eq!(s.builds("7"), vec![(900, 100, "Hotfix".to_string())]);
+        s.mark_steamdb_prompted("7");
+        assert!(s.data["steamdb_prompted"].get("7").is_some());
     }
 }

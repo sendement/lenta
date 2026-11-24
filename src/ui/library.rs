@@ -141,7 +141,7 @@ impl App {
     }
 
     /// The tabs on top: the launchers, then the own collections.
-    fn lib_tabs(&self) -> Vec<LibTab> {
+    pub fn lib_tabs(&self) -> Vec<LibTab> {
         self.lib_sources()
             .into_iter()
             .map(LibTab::Launcher)
@@ -339,6 +339,7 @@ impl App {
                     }
                 })
                 .collect(),
+            Source::Hydra => Vec::new(),
             Source::Lutris | Source::Heroic => {
                 let cats = if src == Source::Lutris {
                     &self.shelves.lutris

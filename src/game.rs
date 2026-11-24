@@ -8,16 +8,18 @@ pub enum Source {
     Steam,
     Heroic,
     Lutris,
+    Hydra,
 }
 
 impl Source {
-    pub const ALL: [Source; 3] = [Source::Steam, Source::Heroic, Source::Lutris];
+    pub const ALL: [Source; 4] = [Source::Steam, Source::Heroic, Source::Lutris, Source::Hydra];
 
     pub fn name(self) -> &'static str {
         match self {
             Source::Steam => "Steam",
             Source::Heroic => "Heroic",
             Source::Lutris => "Lutris",
+            Source::Hydra => "Hydra",
         }
     }
 }
@@ -76,12 +78,35 @@ pub struct Game {
     pub install_dir: Option<PathBuf>,
     /// Commands to try in turn until one starts.
     pub launch: Vec<Vec<String>>,
+    /// Not installed, but its launcher has a download of it (Hydra): how
+    /// far it got (1.0: downloaded, to be installed).
+    pub dl: Option<f32>,
 }
 
 impl Game {
     /// Where its store page lives: its own Steam id, or the match.
     pub fn info_appid(&self) -> Option<u32> {
         self.steam_appid.or(self.store_appid)
+    }
+
+    /// Can Play do anything for it: false for a Hydra game with nothing
+    /// downloaded (it's got from Hydra's sources, there).
+    pub fn playable(&self) -> bool {
+        self.installed || self.source != Source::Hydra || self.dl.is_some()
+    }
+
+    /// What Play says on it: Play, Install, Resume the download, or that
+    /// there's nothing to install from.
+    pub fn play_word(&self) -> &'static str {
+        use crate::i18n::tr;
+        match (self.installed, self.source, self.dl) {
+            (true, _, _) => tr("play"),
+            (false, Source::Hydra, Some(p)) if p < 1.0 => tr("dl_resume"),
+            (false, Source::Hydra, Some(_)) => tr("install_in_hydra"),
+            (false, Source::Hydra, None) => tr("dl_none"),
+            (false, Source::Heroic, _) => tr("open_heroic"),
+            _ => tr("install"),
+        }
     }
 
     pub fn play(&self) -> Result<(), String> {

@@ -6,7 +6,7 @@ use crossbeam_channel::{Receiver, Sender};
 use egui::{Color32, Rect, Ui, vec2};
 
 use crate::config::{AccentMode, Config};
-use crate::game::{Art, Game};
+use crate::game::{Art, Game, Source};
 use crate::i18n::tr;
 use crate::images::{Images, Kind};
 use crate::input::{Action, Input, PadKind};
@@ -196,12 +196,17 @@ pub struct App {
     watch: std::sync::Arc<std::sync::Mutex<Vec<crate::running::Watch>>>,
     /// Running when last drawn (one ending brings lenta back).
     pub was_running: std::collections::HashSet<String>,
+    /// A sideways touchpad swipe: how far it went, and whether it has
+    /// already turned the tab (one tab per swipe).
+    swipe: (f32, bool, f64),
     /// Play pressed: the game and when (until it shows up running).
     pub launching: Option<(String, Instant)>,
     /// The Proton page.
     pub proton: crate::ui::proton::ProtonPage,
     /// A question before an action that can't be undone.
     pub confirm: Option<crate::ui::confirm::Confirm>,
+    /// Installing, moving, uninstalling: the place picker and the job.
+    pub manage: crate::ui::manage::Manage,
     /// The launcher's own collections.
     pub colls: crate::colls::Colls,
     /// Typing a text (the on-screen keyboard).
@@ -295,6 +300,7 @@ impl App {
             music: crate::music::Music::new(music_ctx),
             home_pick: (None, Instant::now()),
             confirm: None,
+            manage: Default::default(),
             colls: crate::colls::Colls::load(),
             osk: None,
             menu: None,
@@ -308,6 +314,7 @@ impl App {
             running: running_shared,
             watch,
             was_running: Default::default(),
+            swipe: (0.0, false, 0.0),
             launching: None,
             apps: Vec::new(),
             scanning: false,
@@ -408,8 +415,10 @@ impl App {
             let mut s = s;
             sources::web::apply_picks(&mut s.games);
             sources::web::apply_picks(&mut s.steam.more);
-            let (shown, hidden): (Vec<Game>, Vec<Game>) = s
-                .games
+            // Launchers' games not installed join Steam's owned ones.
+            let (games, absent): (Vec<Game>, Vec<Game>) =
+                s.games.into_iter().partition(|g| g.installed);
+            let (shown, hidden): (Vec<Game>, Vec<Game>) = games
                 .into_iter()
                 .partition(|g| g.steam_appid.is_none_or(|id| !hidden.contains(&id)));
             self.games = shown;
@@ -444,9 +453,13 @@ impl App {
             self.steam.restart = restart;
             // The quick pass has no account games yet: keep the last ones.
             if first && self.steam.more.is_empty() {
-                self.steam.more = more.into_iter().filter(|g| !g.installed).collect();
+                self.steam.more = more
+                    .into_iter()
+                    .filter(|g| !g.installed && g.source == Source::Steam)
+                    .collect();
             }
             self.steam.more.extend(hidden);
+            self.steam.more.extend(absent);
             if s.last {
                 self.apply_pending_tools(false);
                 if let Some(e) = self.steam.error.take() {
@@ -499,6 +512,34 @@ impl App {
         let Some(g) = self.game_by_key(key) else {
             return;
         };
+        // A Steam game not installed: which library it goes in first.
+        if !g.installed && g.key.starts_with("steam:") && g.steam_appid.is_some() {
+            let k = g.key.clone();
+            self.manage_install(&k);
+            return;
+        }
+        // Hydra's: nothing downloaded, nothing to do; a download is
+        // resumed or installed in Hydra's window (from outside, its
+        // torrent service loses track of it).
+        if !g.installed && g.source == Source::Hydra {
+            match g.dl {
+                None => self.toast(tr("dl_get_in_hydra")),
+                Some(_) => match crate::game::run_first(&[vec!["hydralauncher".into()]]) {
+                    Ok(()) => self.toast(format!("{} Hydra", tr("opening"))),
+                    Err(e) => self.toast(format!("{} Hydra: {e}", tr("launch_failed"))),
+                },
+            }
+            return;
+        }
+        // Another launcher's game: it installs it, in its own window.
+        if !g.installed && g.source != Source::Steam {
+            let msg = format!("{} {}", tr("opening"), g.source.name());
+            match g.play() {
+                Ok(()) => self.toast(msg),
+                Err(e) => self.toast(format!("{} {}: {e}", tr("launch_failed"), g.title)),
+            }
+            return;
+        }
         let title = g.title.clone();
         self.sfx.play(crate::sfx::Sound::Launch);
         let verb = if g.installed {
@@ -645,12 +686,45 @@ impl App {
         out
     }
 
+    /// A sideways two-finger swipe off the ribbon turns the tab, as LT/RT
+    /// do (the ribbon itself scrolls with it). One tab per swipe: the
+    /// swipe ends when the touchpad has been still a moment (its inertia
+    /// keeps sending after the fingers lift).
+    fn swipe_tabs(&mut self, ui: &Ui) -> Option<Action> {
+        let (d, now) = ui.input(|i| (i.smooth_scroll_delta, i.time));
+        let sideways = d.x.abs() > 0.5 && d.x.abs() > d.y.abs() * 1.5;
+        if !sideways {
+            if now - self.swipe.2 > 0.25 {
+                self.swipe = (0.0, false, self.swipe.2);
+            }
+            return None;
+        }
+        self.swipe.2 = now;
+        let on_ribbon = self.game.is_none() && self.page == Page::Home;
+        if on_ribbon || self.modal_open() || self.swipe.1 {
+            return None;
+        }
+        self.swipe.0 += d.x;
+        if self.swipe.0.abs() < 80.0 {
+            return None;
+        }
+        self.swipe.1 = true;
+        // Fingers to the left: the next tab (as the ribbon goes on).
+        Some(if self.swipe.0 < 0.0 {
+            Action::RightTrigger
+        } else {
+            Action::LeftTrigger
+        })
+    }
+
     /// Is a window up over everything (a question, the sign-in…)?
     fn modal_open(&self) -> bool {
         self.login.is_some()
             || self.sgdb.ask.is_some()
             || self.confirm.is_some()
             || self.versions.ask.is_some()
+            || self.versions.import.is_some()
+            || self.manage.pick.is_some()
             || self.osk.is_some()
             || self.menu.is_some()
             || self.cedit.is_some()
@@ -842,6 +916,10 @@ impl App {
             self.cedit_input(a);
             return;
         }
+        if self.manage.pick.is_some() {
+            self.manage_input(a);
+            return;
+        }
         if self.mods.over.is_some() {
             if self.modview_input(crate::ui::modules::Which::Over, a) {
                 self.mods.over = None;
@@ -886,19 +964,25 @@ impl App {
         }
         if self.side_focus {
             let pages = self.pages();
+            // The pages, then Power at the bottom.
+            let power = pages.len();
             match a {
                 Action::Up => self.side_sel = self.side_sel.saturating_sub(1),
-                Action::Down => self.side_sel = (self.side_sel + 1).min(pages.len() - 1),
+                Action::Down => self.side_sel = (self.side_sel + 1).min(power),
+                Action::Accept if self.side_sel == power => {
+                    self.side_focus = false;
+                    self.open_menu(crate::ui::menu::MenuFor::Power, None);
+                }
                 Action::Accept => {
-                    self.go(pages[self.side_sel.min(pages.len() - 1)]);
+                    self.go(pages[self.side_sel.min(power - 1)]);
                     self.side_focus = false;
                 }
                 Action::Back => self.side_focus = false,
                 _ => {}
             }
             // Moving in the panel shows the page at once.
-            if matches!(a, Action::Up | Action::Down) {
-                self.page = pages[self.side_sel.min(pages.len() - 1)];
+            if matches!(a, Action::Up | Action::Down) && self.side_sel < power {
+                self.page = pages[self.side_sel];
             }
             return;
         }
@@ -934,6 +1018,9 @@ impl App {
         }
         if self.confirm.is_some() {
             return vec![(Btn::A, tr("yes")), (Btn::B, tr("cancel"))];
+        }
+        if self.manage.pick.is_some() {
+            return vec![(Btn::A, tr("choose")), (Btn::B, tr("back"))];
         }
         if self.cedit.is_some() {
             return vec![
@@ -977,6 +1064,13 @@ impl App {
             };
             if self.versions.ask.is_some() {
                 return vec![(Btn::A, tr("yes")), (Btn::B, tr("cancel"))];
+            }
+            if self.versions.import.is_some() {
+                return vec![
+                    (Btn::A, tr("choose")),
+                    (Btn::X, tr("sdb_paste_short")),
+                    (Btn::B, tr("close")),
+                ];
             }
             if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Versions {
                 return vec![
@@ -1108,8 +1202,8 @@ impl App {
             if self.cfg.sort != self.saved.sort {
                 self.resort();
             }
-            let sources_changed = (self.cfg.steam, self.cfg.heroic, self.cfg.lutris)
-                != (self.saved.steam, self.saved.heroic, self.saved.lutris);
+            let sources_changed = (self.cfg.steam, self.cfg.heroic, self.cfg.lutris, self.cfg.hydra)
+                != (self.saved.steam, self.saved.heroic, self.saved.lutris, self.saved.hydra);
             self.saved = self.cfg.clone();
             self.changed_at = Some(Instant::now());
             if sources_changed {
@@ -1190,6 +1284,10 @@ impl eframe::App for App {
             self.glyphs = Glyphs::Keys;
         }
         for a in keys {
+            self.handle(a);
+        }
+        if let Some(a) = self.swipe_tabs(ui) {
+            self.last_input = Instant::now();
             self.handle(a);
         }
         // Back from a game: play time and achievements may have changed.
@@ -1334,6 +1432,10 @@ impl eframe::App for App {
                 if self.menu.is_some() {
                     self.draw_menu(ui, full);
                 }
+                if self.manage.pick.is_some() {
+                    self.draw_manage_pick(ui, full);
+                }
+                self.draw_manage_job(ui, full);
                 if self.cedit.is_some() {
                     self.draw_cedit(ui, full);
                 }

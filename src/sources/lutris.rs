@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::game::{Art, Arts, Game, Source};
 
-fn roots() -> Vec<(PathBuf, bool)> {
+pub fn roots() -> Vec<(PathBuf, bool)> {
     if let Some(r) = std::env::var_os("LENTA_LUTRIS_ROOT") {
         return vec![(PathBuf::from(r), false)];
     }
@@ -190,6 +190,7 @@ pub fn games() -> Vec<Game> {
                 .or_else(|| exe.as_ref().and_then(|e| e.parent()).map(Path::to_path_buf));
             let play = (play.unwrap_or(0.0) * 60.0).round() as u64;
             out.push(Game {
+                dl: None,
                 key: format!("lutris:{id}"),
                 title: name.unwrap_or_else(|| slug.clone()),
                 source: Source::Lutris,

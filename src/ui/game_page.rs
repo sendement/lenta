@@ -125,6 +125,11 @@ impl App {
         if let Some(v) = self.game.as_mut() {
             v.follow = true;
         }
+        // Pasting versions from SteamDB.
+        if self.versions.import.is_some() {
+            self.import_input(a);
+            return;
+        }
         // A question about a version is up: A yes, B no.
         if self.versions.ask.is_some() {
             match a {
@@ -592,8 +597,11 @@ impl App {
                 Some(crate::running::Work::Queued) => {
                     (tr("play").into(), Some(tr("st_queued").into()))
                 }
-                None if g.installed => (tr("play").into(), None),
-                None => (tr("install").into(), None),
+                None => (
+                    g.play_word().into(),
+                    g.dl.filter(|p| !g.installed && *p < 1.0)
+                        .map(|p| format!("{}%", (p * 100.0).floor() as u32)),
+                ),
             }
         };
         if running {
@@ -612,6 +620,8 @@ impl App {
                 Color32::WHITE,
                 None,
             );
+        } else if !g.playable() {
+            p.rect_filled(play_r, 14.0, Color32::from_white_alpha(22));
         } else {
             card::draw(
                 &p,
@@ -805,6 +815,9 @@ impl App {
         self.draw_big_shot(ui, rect.expand2(vec2(0.0, 60.0)), &g);
         if self.versions.ask.is_some() {
             self.draw_versions_ask(ui, rect.expand2(vec2(0.0, 60.0)));
+        }
+        if self.versions.import.is_some() {
+            self.draw_steamdb_import(ui, rect.expand2(vec2(0.0, 60.0)));
         }
     }
 

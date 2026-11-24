@@ -1,5 +1,7 @@
-//! Heroic Games Launcher: installed Epic (legendary), GOG, Amazon (nile)
-//! and side-loaded games from its library caches, play time from its store.
+//! Heroic Games Launcher: Epic (legendary), GOG, Amazon (nile) and
+//! side-loaded games from its library caches, play time from its store.
+//! Games owned but not installed are listed too; Play opens Heroic (its
+//! install, asked for from outside, needs its own window open first).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,7 +10,7 @@ use serde_json::Value;
 
 use crate::game::{Art, Arts, Game, Source};
 
-fn roots() -> Vec<(PathBuf, bool)> {
+pub fn roots() -> Vec<(PathBuf, bool)> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
@@ -71,6 +73,9 @@ pub fn games() -> Vec<Game> {
                 times.insert(k, (total, last));
             }
         }
+        // What Heroic's tools have installed (its library caches don't
+        // always say): appName → install folder.
+        let installed_at = installed_lists(&root);
         let libs = [
             ("store_cache/legendary_library.json", "legendary", "Epic"),
             ("store_cache/gog_library.json", "gog", "GOG"),
@@ -88,11 +93,18 @@ pub fn games() -> Vec<Game> {
                 .cloned()
                 .unwrap_or_default();
             for g in list {
-                if g.get("is_installed").and_then(Value::as_bool) != Some(true) {
+                // DLCs and GOG's redistributables aren't games.
+                if g.pointer("/install/is_dlc").and_then(Value::as_bool) == Some(true) {
                     continue;
                 }
                 let Some(app) = g.get("app_name").and_then(Value::as_str) else {
                     continue;
+                };
+                let at = installed_at.get(app).cloned();
+                let installed = if runner == "sideload" {
+                    g.get("is_installed").and_then(Value::as_bool) == Some(true)
+                } else {
+                    at.is_some()
                 };
                 let title = g
                     .get("title")
@@ -105,22 +117,27 @@ pub fn games() -> Vec<Game> {
                     .unwrap_or(runner)
                     .to_string();
                 let url = format!("heroic://launch?appName={app}&runner={runner}");
+                // Not installed: Heroic's own window, to install it there.
                 let mut launch = Vec::new();
-                if flatpak {
-                    launch.push(vec![
-                        "flatpak".into(),
-                        "run".into(),
-                        "com.heroicgameslauncher.hgl".into(),
-                        "--no-gui".into(),
-                        url.clone(),
-                    ]);
+                let mut base: Vec<String> = if flatpak {
+                    ["flatpak", "run", "com.heroicgameslauncher.hgl"]
+                        .map(String::from)
+                        .to_vec()
                 } else {
-                    launch.push(vec!["heroic".into(), "--no-gui".into(), url.clone()]);
+                    vec!["heroic".to_string()]
+                };
+                if installed {
+                    base.push("--no-gui".into());
+                    base.push(url.clone());
+                    launch.push(base);
+                    launch.push(vec!["xdg-open".into(), url]);
+                } else {
+                    launch.push(base);
                 }
-                launch.push(vec!["xdg-open".into(), url]);
                 let (play, last) = times.get(app).copied().unwrap_or_default();
                 let cover = art(&g, "art_cover");
                 out.push(Game {
+                    dl: None,
                     key: format!("heroic:{runner}:{app}"),
                     title,
                     source: Source::Heroic,
@@ -138,16 +155,44 @@ pub fn games() -> Vec<Game> {
                     last_played: (last > 0).then_some(last),
                     steam_appid: None,
                     store_appid: None,
-                    installed: true,
+                    installed,
                     compat_id: None,
                     emu: None,
                     prefix: wine_prefix(&root, app),
-                    install_dir: g
-                        .pointer("/install/install_path")
-                        .and_then(Value::as_str)
-                        .map(PathBuf::from),
+                    install_dir: at.flatten().or_else(|| {
+                        g.pointer("/install/install_path")
+                            .and_then(Value::as_str)
+                            .filter(|_| installed)
+                            .map(PathBuf::from)
+                    }),
                     launch,
                 });
+            }
+        }
+    }
+    out
+}
+
+/// The games legendary, gogdl and nile have installed, with their folders.
+pub fn installed_lists(root: &std::path::Path) -> HashMap<String, Option<PathBuf>> {
+    let mut out = HashMap::new();
+    let path = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(PathBuf::from);
+    if let Some(Value::Object(m)) = read_json(root.join("legendaryConfig/legendary/installed.json")) {
+        for (app, v) in m {
+            out.insert(app, path(&v, "install_path"));
+        }
+    }
+    if let Some(v) = read_json(root.join("gog_store/installed.json")) {
+        for g in v.get("installed").and_then(Value::as_array).into_iter().flatten() {
+            if let Some(app) = g.get("appName").and_then(Value::as_str) {
+                out.insert(app.to_string(), path(g, "install_path"));
+            }
+        }
+    }
+    if let Some(Value::Array(list)) = read_json(root.join("nile_config/nile/installed.json")) {
+        for g in list {
+            if let Some(app) = g.get("id").and_then(Value::as_str) {
+                out.insert(app.to_string(), path(&g, "path"));
             }
         }
     }

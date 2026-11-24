@@ -265,6 +265,7 @@ mod tests {
 
     fn game(key: &str, title: &str, installed: bool, last: Option<u64>, min: u64) -> Game {
         Game {
+            dl: None,
             key: key.into(),
             title: title.into(),
             source: Source::Steam,

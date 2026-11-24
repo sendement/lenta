@@ -86,10 +86,48 @@ impl App {
         let row_h = 58.0;
         let top = rect.top() + 100.0;
         let pages = self.pages();
+        // Power at the very bottom, About over it.
+        let low = |k: f32| rect.bottom() - bottom - 16.0 - row_h * k - 6.0 * (k - 1.0);
+        {
+            let i = pages.len();
+            let r = Rect::from_min_size(pos2(rect.left() + 10.0, low(1.0)), vec2(w - 20.0, row_h));
+            let resp = ui.interact(r, id.with("power"), Sense::click());
+            let focused = self.side_focus && self.side_sel == i;
+            if focused {
+                p.rect_stroke(
+                    r,
+                    14.0,
+                    egui::Stroke::new(2.0, c1),
+                    egui::StrokeKind::Inside,
+                );
+            } else if resp.hovered() {
+                p.rect_filled(r, 14.0, Color32::from_white_alpha(12));
+            }
+            let color = if focused {
+                Color32::WHITE
+            } else {
+                Color32::from_gray(170)
+            };
+            let ic = pos2(rect.left() + COLLAPSED / 2.0, r.center().y);
+            widgets::icon(&p, ic, 26.0, Icon::Power, color);
+            if t > 0.3 {
+                let alpha = ((t - 0.3) / 0.7).clamp(0.0, 1.0);
+                p.text(
+                    pos2(rect.left() + COLLAPSED - 2.0, r.center().y),
+                    Align2::LEFT_CENTER,
+                    tr("power"),
+                    FontId::proportional(19.0),
+                    color.gamma_multiply(alpha),
+                );
+            }
+            if resp.clicked() {
+                self.side_focus = false;
+                self.open_menu(crate::ui::menu::MenuFor::Power, Some(r.right_top()));
+            }
+        }
         for (i, page) in pages.iter().enumerate() {
-            // About sits at the bottom.
             let y = if *page == Page::About {
-                rect.bottom() - bottom - row_h - 16.0
+                low(2.0)
             } else {
                 top + i as f32 * (row_h + 6.0)
             };

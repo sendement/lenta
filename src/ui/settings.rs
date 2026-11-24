@@ -42,9 +42,11 @@ pub enum S {
     Steam,
     Heroic,
     Lutris,
+    Hydra,
     Rescan,
     Account,
     Uninstalled,
+    SteamLibs,
     Sgdb,
     ThemeMusic,
     ThemeMusicRibbon,
@@ -103,10 +105,12 @@ const ROWS: &[Row] = &[
     Row::Item(S::Steam),
     Row::Item(S::Heroic),
     Row::Item(S::Lutris),
+    Row::Item(S::Hydra),
     Row::Item(S::Rescan),
     Row::Head("s_account"),
     Row::Item(S::Account),
     Row::Item(S::Uninstalled),
+    Row::Item(S::SteamLibs),
     Row::Head("s_sgdb"),
     Row::Item(S::Sgdb),
 ];
@@ -147,12 +151,13 @@ fn kind(s: S) -> Kind {
         | S::Steam
         | S::Heroic
         | S::Lutris
+        | S::Hydra
         | S::Uninstalled
         | S::ThemeMusic
         | S::ThemeMusicRibbon
         | S::UiSounds => Kind::Toggle,
         S::Color1 | S::Color2 => Kind::Color,
-        S::Rescan | S::Account | S::Sgdb | S::SoundStore => Kind::Button,
+        S::Rescan | S::Account | S::Sgdb | S::SoundStore | S::SteamLibs => Kind::Button,
         _ => Kind::Choice,
     }
 }
@@ -187,9 +192,11 @@ fn label(s: S) -> &'static str {
         S::Steam => "src_steam",
         S::Heroic => "src_heroic",
         S::Lutris => "src_lutris",
+        S::Hydra => "src_hydra",
         S::Rescan => "rescan",
         S::Account => "account",
         S::Uninstalled => "show_uninstalled",
+        S::SteamLibs => "mg_libs",
         S::Sgdb => "sgdb_key",
         S::ThemeMusic => "theme_music",
         S::ThemeMusicRibbon => "theme_music_ribbon",
@@ -229,6 +236,7 @@ fn toggle_ref(c: &mut Config, s: S) -> Option<&mut bool> {
         S::Steam => &mut c.steam,
         S::Heroic => &mut c.heroic,
         S::Lutris => &mut c.lutris,
+        S::Hydra => &mut c.hydra,
         S::Uninstalled => &mut c.show_uninstalled,
         S::ThemeMusic => &mut c.theme_music,
         S::ThemeMusicRibbon => &mut c.theme_music_ribbon,
@@ -382,7 +390,7 @@ fn relevant(c: &Config, s: S) -> bool {
         S::Reflection => c.orientation == Orientation::Horizontal,
         S::TiltMode => c.tilt > 0.0,
         S::BgDim => c.bg_hero,
-        S::Account | S::Uninstalled => c.steam,
+        S::Account | S::Uninstalled | S::SteamLibs => c.steam,
         S::MusicVolume | S::ThemeMusicRibbon => c.theme_music,
         S::SoundPack | S::SoundVolume => c.ui_sounds,
         _ => true,
@@ -475,6 +483,7 @@ impl App {
                 S::Sgdb if self.sgdb.has_key() => self.sgdb_disconnect(),
                 S::Sgdb => self.sgdb_connect(None),
                 S::SoundStore => self.go(crate::app::Page::Sounds),
+                S::SteamLibs => self.open_libraries(),
                 _ => {}
             },
             Kind::Slider { .. } => {}
@@ -851,7 +860,7 @@ impl App {
                     S::Sgdb if self.sgdb.job.is_some() => "…".to_string(),
                     S::Sgdb if self.sgdb.has_key == Some(true) => tr("sgdb_disconnect").to_string(),
                     S::Sgdb => tr("sgdb_connect").to_string(),
-                    S::SoundStore => tr("open").to_string(),
+                    S::SoundStore | S::SteamLibs => tr("open").to_string(),
                     _ if self.scanning => "…".to_string(),
                     _ => "↻".to_string(),
                 };

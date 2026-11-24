@@ -3,6 +3,7 @@
 pub mod desktop;
 pub mod emu;
 pub mod heroic;
+pub mod hydra;
 pub mod lutris;
 pub mod steam;
 pub mod steamplay;
@@ -40,21 +41,23 @@ pub fn shelves(cfg: &Config) -> Shelves {
     }
 }
 
-/// Every installed game from the enabled sources.
+/// Every game from the enabled sources: installed ones, and those the
+/// launchers (Heroic, Hydra) have in their library but not installed.
 pub fn scan(cfg: &Config) -> Vec<Game> {
-    let (steam, heroic, lutris) = (cfg.steam, cfg.heroic, cfg.lutris);
+    let (steam, heroic, lutris, hydra) = (cfg.steam, cfg.heroic, cfg.lutris, cfg.hydra);
     let s = std::thread::spawn(move || if steam { steam::games() } else { Vec::new() });
     let h = std::thread::spawn(move || if heroic { heroic::games() } else { Vec::new() });
     let l = std::thread::spawn(move || if lutris { lutris::games() } else { Vec::new() });
+    let y = std::thread::spawn(move || if hydra { hydra::games() } else { Vec::new() });
     let mut out = Vec::new();
-    for t in [s, h, l] {
+    for t in [s, h, l, y] {
         out.extend(t.join().unwrap_or_default());
     }
     // Games from elsewhere: a Steam emulator's files name the store id
     // and keep the achievements.
     for g in out.iter_mut().filter(|g| g.steam_appid.is_none()) {
         let (id, save) = emu::resolve(g.prefix.as_deref(), g.install_dir.as_deref());
-        g.store_appid = id;
+        g.store_appid = g.store_appid.or(id);
         g.emu = save;
     }
     out

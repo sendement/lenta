@@ -9,7 +9,7 @@ use crate::game::Source;
 use crate::input::PadKind;
 
 /// Each launcher's own colours, for its tab and badges: Steam's blue,
-/// Heroic's violet, Lutris's orange.
+/// Heroic's violet, Lutris's orange, Hydra's teal.
 pub fn source_colors(s: Source) -> (Color32, Color32) {
     match s {
         Source::Steam => (
@@ -23,6 +23,10 @@ pub fn source_colors(s: Source) -> (Color32, Color32) {
         Source::Lutris => (
             Color32::from_rgb(0xff, 0xa2, 0x1c),
             Color32::from_rgb(0xe8, 0x50, 0x1e),
+        ),
+        Source::Hydra => (
+            Color32::from_rgb(0x3d, 0xe0, 0xb0),
+            Color32::from_rgb(0x12, 0x84, 0x8c),
         ),
     }
 }
@@ -317,6 +321,8 @@ pub enum Icon {
     Bluetooth,
     /// Three sliders: system settings.
     Sliders,
+    /// The power sign: a broken ring and a bar.
+    Power,
 }
 
 pub fn icon(p: &Painter, c: Pos2, s: f32, icon: Icon, color: Color32) {
@@ -374,6 +380,20 @@ pub fn icon(p: &Painter, c: Pos2, s: f32, icon: Icon, color: Color32) {
             p.circle_stroke(c, h * 0.9, st);
             p.circle_filled(c + vec2(0.0, -h * 0.4), s * 0.06, color);
             p.line_segment([c + vec2(0.0, -h * 0.1), c + vec2(0.0, h * 0.5)], st);
+        }
+        Icon::Power => {
+            let r = h * 0.78;
+            let arc: Vec<Pos2> = (0..=24)
+                .map(|k| {
+                    // From the top-right gap round to the top-left one.
+                    let a = -std::f32::consts::FRAC_PI_2
+                        + 0.62
+                        + (std::f32::consts::TAU - 1.24) * k as f32 / 24.0;
+                    c + vec2(0.0, h * 0.08) + vec2(r * a.cos(), r * a.sin())
+                })
+                .collect();
+            p.add(Shape::line(arc, st));
+            p.line_segment([c + vec2(0.0, -h * 0.95), c + vec2(0.0, -h * 0.05)], st);
         }
         Icon::Sliders => {
             for (k, at) in [(-1.0f32, 0.35f32), (0.0, -0.4), (1.0, 0.15)] {

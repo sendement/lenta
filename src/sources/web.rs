@@ -39,11 +39,17 @@ fn cached_get(file: PathBuf, url: &str, ok: impl Fn(&[u8]) -> bool) -> Option<Ve
     }
 }
 
-/// Lower-case words of letters and digits; marks like ™ and ® dropped.
+/// Lower-case words of letters and digits; marks like ™ and ® dropped,
+/// "GOTY" spelled out (GOG's "Morrowind GOTY Edition" is Steam's "Game of
+/// the Year Edition").
 pub fn words(s: &str) -> Vec<String> {
     s.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
+        .flat_map(|w| match w {
+            "goty" => vec!["game", "of", "the", "year"],
+            w => vec![w],
+        })
         .map(str::to_string)
         .collect()
 }

@@ -353,7 +353,7 @@ fn shots() {
         }
         if p == Page::Library {
             // Each source's own tab colours.
-            for i in 1..=2 {
+            for i in 1..=3 {
                 h.state_mut().handle(Action::RightTrigger);
                 snap(&mut h, &dir, &format!("library-{i}"));
             }
@@ -1181,4 +1181,193 @@ fn game_running() {
     );
     snap(&mut h, &dir, "game-updating");
     assert!(h.state().was_running.is_empty());
+}
+
+/// Power from the side panel (asked, never run), a sideways touchpad
+/// swipe turning the Library's tab, and SteamDB versions pasted in
+/// (nothing saved under the dry run).
+#[test]
+#[ignore]
+fn power_swipe_steamdb() {
+    use crate::app::{Page, Tab};
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    // Power: the last thing in the side panel.
+    h.state_mut().handle(Action::View);
+    let n = h.state().pages().len();
+    for _ in 0..n + 2 {
+        h.state_mut().handle(Action::Down);
+    }
+    assert_eq!(h.state().side_sel, n);
+    snap(&mut h, &dir, "power-side");
+    h.state_mut().handle(Action::Accept);
+    assert!(h.state().menu.is_some());
+    snap(&mut h, &dir, "power-menu");
+    h.state_mut().handle(Action::Down);
+    h.state_mut().handle(Action::Accept);
+    assert!(h.state().confirm.is_some(), "asks before restarting");
+    snap(&mut h, &dir, "power-ask");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().confirm.is_none() && h.state().menu.is_none());
+
+    // A swipe to the left on the Library: the next launcher, once.
+    h.state_mut().go(Page::Library);
+    settle(&mut h, 5);
+    let before = h.state().lib.filter;
+    let tabs = h.state().lib_tabs().len();
+    h.input_mut()
+        .events
+        .push(egui::Event::PointerMoved(egui::pos2(800.0, 500.0)));
+    for _ in 0..12 {
+        h.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(-30.0, 0.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Default::default(),
+        });
+        h.step();
+    }
+    assert_eq!(
+        h.state().lib.filter,
+        (before + 1) % tabs,
+        "one tab per swipe"
+    );
+    // Still, then another swipe the other way: back.
+    std::thread::sleep(std::time::Duration::from_millis(350));
+    settle(&mut h, 3);
+    for _ in 0..12 {
+        h.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(30.0, 0.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Default::default(),
+        });
+        h.step();
+    }
+    assert_eq!(h.state().lib.filter, before);
+    snap(&mut h, &dir, "swipe-library");
+
+    // SteamDB: Graveyard Keeper 2 (allowed for tests), its Versions tab.
+    let key = "steam:4358690".to_string();
+    if !h.state().games.iter().any(|g| g.key == key && g.installed) {
+        return;
+    }
+    h.state_mut().go(Page::Home);
+    h.state_mut().open_game(key);
+    if let Some(v) = h.state_mut().game.as_mut() {
+        v.tab = Tab::Versions;
+        v.focus = crate::ui::game_page::INSIDE;
+    }
+    for _ in 0..300 {
+        h.step();
+        if h.state().versions.data.is_some() && h.state().versions.loading.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    h.state_mut().open_steamdb_import();
+    assert!(h.state().versions.import.is_some());
+    snap(&mut h, &dir, "steamdb-empty");
+    let depot = h.state().versions.import.as_ref().unwrap().depots[0]
+        .0
+        .clone();
+    h.input_mut().events.push(egui::Event::Paste(format!(
+        "Seen Date\tRelative\tManifest ID\n\
+         1 March 2025 – 10:00:00 UTC\t8 months ago\t9876543210987654321\n\
+         download_depot 4358690 {depot} 1234567890123456789\n\
+         \nDate\tBuild ID\tPatch notes\n\
+         13 September 2025 – 14:00:00 UTC\t15001000\tHotfix 1.0.5\n"
+    )));
+    settle(&mut h, 3);
+    let im = h.state().versions.import.as_ref().unwrap();
+    assert_eq!(im.entries.len(), 2);
+    assert_eq!(im.builds.len(), 1);
+    snap(&mut h, &dir, "steamdb-pasted");
+    assert!(
+        h.state()
+            .hint_items()
+            .iter()
+            .any(|(_, t)| *t == "Вставить" || *t == "Paste")
+    );
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().versions.import.is_none());
+}
+
+/// Steam libraries, moving and uninstalling: only looked at (every
+/// question answered Cancel; jobs do nothing under the dry run).
+#[test]
+#[ignore]
+fn manage_games() {
+    use crate::app::Page;
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    // Settings → Steam libraries.
+    h.state_mut().go(Page::Settings);
+    h.state_mut().open_libraries();
+    settle(&mut h, 5);
+    assert!(h.state().manage.pick.is_some());
+    snap(&mut h, &dir, "manage-libraries");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().manage.pick.is_none());
+
+    let key = "steam:4358690".to_string();
+    if !h.state().games.iter().any(|g| g.key == key && g.installed) {
+        return;
+    }
+    h.state_mut().go(Page::Home);
+    h.state_mut()
+        .open_menu(crate::ui::menu::MenuFor::Game(key.clone()), None);
+    settle(&mut h, 3);
+    snap(&mut h, &dir, "manage-menu");
+    h.state_mut().menu = None;
+    h.state_mut().manage_move(&key);
+    settle(&mut h, 3);
+    // Somewhere to go only with another drive plugged in.
+    if h.state().manage.pick.is_some() {
+        snap(&mut h, &dir, "manage-move");
+        h.state_mut().handle(Action::Accept);
+        if h.state().confirm.is_some() {
+            snap(&mut h, &dir, "manage-move-ask");
+            h.state_mut().handle(Action::Back);
+        }
+    } else {
+        snap(&mut h, &dir, "manage-move-nowhere");
+    }
+    h.state_mut().manage.pick = None;
+    h.state_mut().manage_uninstall(&key);
+    assert!(h.state().confirm.is_some(), "asks before uninstalling");
+    snap(&mut h, &dir, "manage-uninstall-ask");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().confirm.is_none() && h.state().manage.job.is_none());
+
+    // The job's card, as one would look half way.
+    let (_tx, rx) = crossbeam_channel::bounded(1);
+    let progress = std::sync::Arc::new(std::sync::Mutex::new(crate::steamlib::Progress {
+        done: 45 << 30,
+        total: 100 << 30,
+        stage: "mg_copying",
+    }));
+    h.state_mut().manage.job = Some(crate::ui::manage::Job {
+        key: Some(key.clone()),
+        label: "Перенос «Graveyard Keeper 2»".into(),
+        progress,
+        cancel: Default::default(),
+        done: rx,
+    });
+    snap(&mut h, &dir, "manage-job");
+    h.state_mut().manage.job = None;
 }

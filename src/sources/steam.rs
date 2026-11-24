@@ -42,6 +42,11 @@ fn flatpak_root(root: &Path) -> bool {
     root.to_string_lossy().contains("com.valvesoftware.Steam")
 }
 
+/// Every library folder Steam lists that is there now.
+pub fn library_dirs(root: &Path) -> Vec<PathBuf> {
+    libraries(root)
+}
+
 fn libraries(root: &Path) -> Vec<PathBuf> {
     let mut libs = vec![root.to_path_buf()];
     if let Ok(text) = std::fs::read_to_string(root.join("steamapps/libraryfolders.vdf")) {
@@ -367,6 +372,7 @@ pub fn games() -> Vec<Game> {
             }
             let (play, last) = times.get(&appid).copied().unwrap_or_default();
             out.push(Game {
+                dl: None,
                 key: format!("steam:{appid}"),
                 title: if name.is_empty() {
                     format!("App {appid}")
@@ -432,6 +438,7 @@ pub fn soundtracks() -> Vec<Game> {
         for (id, name, path) in found {
             let p = path.display().to_string();
             out.push(Game {
+                dl: None,
                 key: format!("steam-ost:{id}"),
                 title: name,
                 source: Source::Steam,
@@ -484,6 +491,7 @@ pub fn uninstalled(owned: &[crate::account::Owned]) -> Vec<Game> {
     owned
         .iter()
         .map(|o| Game {
+            dl: None,
             key: format!("steam:{}", o.appid),
             title: o.name.clone(),
             source: Source::Steam,
@@ -556,6 +564,7 @@ fn shortcuts(root: &Path, users: &[(u32, PathBuf)]) -> Vec<Game> {
             let long_id = ((id as u64) << 32) | 0x0200_0000;
             let last = s.get_int("LastPlayTime").unwrap_or(0).max(0) as u64;
             out.push(Game {
+                dl: None,
                 key: format!("steam-shortcut:{id}"),
                 title: name.to_string(),
                 source: Source::Steam,

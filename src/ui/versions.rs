@@ -44,6 +44,8 @@ pub struct Versions {
     pub ticked: Option<usize>,
     /// The question on screen.
     pub ask: Option<Ask>,
+    /// Versions pasted from SteamDB (the window is up).
+    pub import: Option<crate::ui::steamdb::Import>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -51,6 +53,8 @@ enum Row {
     /// "Install the ticked version" (or the running job, to cancel).
     Action,
     Version(usize),
+    /// "Not here? From SteamDB…"
+    Import,
     Unlock,
     UnlockValidate,
 }
@@ -62,6 +66,7 @@ impl Versions {
         };
         let mut v = vec![Row::Action];
         v.extend((0..d.versions.len()).map(Row::Version));
+        v.push(Row::Import);
         if d.lock.is_some() {
             v.push(Row::Unlock);
             v.push(Row::UnlockValidate);
@@ -243,6 +248,7 @@ impl App {
                     Some(i)
                 };
             }
+            Some(Row::Import) => self.open_steamdb_import(),
             Some(Row::Unlock) if self.versions.op.is_none() => {
                 self.versions.ask = Some(Ask::Unlock { validate: false })
             }
@@ -449,6 +455,42 @@ impl App {
                         Color32::from_gray(205),
                     );
                 }
+                Row::Import => {
+                    p.rect_filled(
+                        r,
+                        12.0,
+                        if resp.hovered() {
+                            Color32::from_white_alpha(18)
+                        } else {
+                            Color32::from_black_alpha(90)
+                        },
+                    );
+                    if focused {
+                        p.rect_stroke(r, 12.0, Stroke::new(2.5, c1), StrokeKind::Inside);
+                    }
+                    let ic = r.left_center() + vec2(24.0, 0.0);
+                    p.text(
+                        ic,
+                        Align2::CENTER_CENTER,
+                        "+",
+                        FontId::proportional(24.0),
+                        c1,
+                    );
+                    p.text(
+                        r.left_top() + vec2(48.0, 9.0),
+                        Align2::LEFT_TOP,
+                        tr("sdb_row"),
+                        FontId::proportional(17.0),
+                        Color32::WHITE,
+                    );
+                    p.text(
+                        r.left_top() + vec2(48.0, 33.0),
+                        Align2::LEFT_TOP,
+                        tr("sdb_row_note"),
+                        FontId::proportional(13.0),
+                        Color32::from_gray(150),
+                    );
+                }
                 Row::Unlock | Row::UnlockValidate => {
                     let validate = *row == Row::UnlockValidate;
                     p.rect_filled(
@@ -493,6 +535,7 @@ impl App {
         }
         if let Some(i) = clicked
             && self.versions.ask.is_none()
+            && self.versions.import.is_none()
         {
             if let Some(v) = self.game.as_mut() {
                 v.focus = crate::ui::game_page::INSIDE;

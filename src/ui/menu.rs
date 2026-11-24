@@ -15,6 +15,8 @@ use crate::input::Action;
 pub enum MenuFor {
     Game(String),
     Coll(u64),
+    /// Power off, restart, log out.
+    Power,
 }
 
 pub struct Menu {
@@ -33,6 +35,10 @@ enum Item {
     NewColl,
     Edit(u64),
     Delete(u64),
+    Power(crate::power::Power),
+    Move,
+    Uninstall,
+    CancelJob,
 }
 
 impl App {
@@ -49,15 +55,26 @@ impl App {
                 let Some(g) = self.game_by_key(key) else {
                     return Vec::new();
                 };
-                let play = if g.installed {
-                    tr("play")
-                } else {
-                    tr("install")
-                };
+                let play = g.play_word();
                 let mut v = vec![
                     (Item::Open, tr("open").to_string(), None),
                     (Item::Play, play.to_string(), None),
                 ];
+                if self
+                    .manage
+                    .job
+                    .as_ref()
+                    .is_some_and(|j| j.key.as_deref() == Some(key.as_str()))
+                {
+                    v.push((Item::CancelJob, tr("mg_cancel").to_string(), None));
+                } else {
+                    if self.can_move(key) {
+                        v.push((Item::Move, tr("mg_move_dots").to_string(), None));
+                    }
+                    if self.can_uninstall(key) {
+                        v.push((Item::Uninstall, tr("mg_uninstall_dots").to_string(), None));
+                    }
+                }
                 let facts = self.facts(g);
                 for c in &self.colls.list {
                     v.push((Item::Toggle(c.id), c.name.clone(), Some(c.has(g, &facts))));
@@ -70,6 +87,10 @@ impl App {
                 (Item::Edit(*id), tr("coll_edit").to_string(), None),
                 (Item::Delete(*id), tr("coll_delete").to_string(), None),
             ],
+            MenuFor::Power => crate::power::Power::ALL
+                .iter()
+                .map(|p| (Item::Power(*p), tr(p.key()).to_string(), None))
+                .collect(),
         }
     }
 
@@ -117,6 +138,22 @@ impl App {
                 self.menu = None;
                 self.ask_delete_coll(id);
             }
+            (Item::Move, MenuFor::Game(k)) => {
+                self.menu = None;
+                self.manage_move(&k);
+            }
+            (Item::Uninstall, MenuFor::Game(k)) => {
+                self.menu = None;
+                self.manage_uninstall(&k);
+            }
+            (Item::CancelJob, _) => {
+                self.menu = None;
+                self.cancel_manage();
+            }
+            (Item::Power(pw), _) => {
+                self.menu = None;
+                self.ask_power(pw);
+            }
             _ => {}
         }
     }
@@ -159,6 +196,7 @@ impl App {
                 .get(*id)
                 .map(|c| c.name.clone())
                 .unwrap_or_default(),
+            MenuFor::Power => tr("power").to_string(),
         };
         let row_h = 44.0;
         let w = 380.0;

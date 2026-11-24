@@ -16,14 +16,17 @@ mod maint;
 mod modules;
 mod music;
 mod net;
+mod power;
 mod protonup;
 mod running;
 mod sandbox;
 mod sfx;
 mod sgdb;
 mod sources;
+mod steamlib;
 mod store;
 mod ui;
+mod uninstall;
 mod vdf;
 
 #[cfg(test)]
@@ -46,6 +49,15 @@ fn main() -> eframe::Result {
     if std::env::args().nth(1).as_deref() == Some("--diagnose") {
         diagnose();
         return Ok(());
+    }
+    // Moving a Steam game to another library: --move APP FOLDER (the
+    // library's folder, made a library if it isn't one).
+    if let [_, cmd, app, to] = std::env::args().collect::<Vec<_>>().as_slice()
+        && cmd == "--move"
+    {
+        let cfg = config::Config::load();
+        i18n::set(cfg.lang);
+        return move_cli(app, to);
     }
     // Rolling back from the command line: --versions APP, --install APP N
     // (the Nth listed version: downloads what's missing, closes Steam,
@@ -120,8 +132,9 @@ fn main() -> eframe::Result {
         sources::sort(&mut games, cfg.sort);
         for g in &games {
             println!(
-                "{:<8} {:<40} {:>6} min  last {:>10}  portrait {}",
+                "{:<8} {} {:<40} {:>6} min  last {:>10}  portrait {}",
                 g.source.name(),
+                if g.installed { "+" } else { "-" },
                 g.title,
                 g.playtime_min.unwrap_or(0),
                 g.last_played.map(game::date).unwrap_or_default(),
@@ -315,4 +328,49 @@ fn diagnose() {
             .map(|m| m.id.clone())
             .collect::<Vec<_>>()
     );
+}
+
+fn move_cli(app: &str, to: &str) -> eframe::Result {
+    let fail = |e: String| -> ! {
+        eprintln!("{e}");
+        std::process::exit(1)
+    };
+    let Ok(app) = app.parse::<u32>() else {
+        fail("APP is a number".into())
+    };
+    let Some(root) = steamlib::root() else {
+        fail("Steam not found".into())
+    };
+    let to = std::path::PathBuf::from(to);
+    let known = steamlib::libraries(&root)
+        .iter()
+        .any(|l| Some(&l.path) == to.canonicalize().ok().as_ref());
+    let place = if known {
+        steamlib::Place::Lib(to.canonicalize().unwrap())
+    } else {
+        steamlib::Place::New(to)
+    };
+    let last = std::sync::Mutex::new(String::new());
+    let report = |p: steamlib::Progress| {
+        let line = match (p.done * 100).checked_div(p.total) {
+            Some(pc) => format!("{} {pc}%", i18n::tr(p.stage)),
+            None => i18n::tr(p.stage).to_string(),
+        };
+        let mut l = last.lock().unwrap();
+        if *l != line {
+            println!("{line}");
+            *l = line;
+        }
+    };
+    match steamlib::move_games(
+        &root,
+        &[app],
+        &place,
+        &report,
+        &std::sync::atomic::AtomicBool::new(false),
+    ) {
+        Ok((n, _)) => println!("moved: {n}"),
+        Err(e) => fail(e),
+    }
+    Ok(())
 }

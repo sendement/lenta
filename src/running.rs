@@ -331,11 +331,52 @@ fn signal(pids: &[i32], sig: i32) {
     }
 }
 
+/// Ask every process with this name to close (SIGTERM), wait for them
+/// up to `secs`; true when none is left.
+pub fn close_named(name: &str, secs: u64) -> bool {
+    // Only the app itself, not its helpers: it closes them as it quits,
+    // after saving (Hydra's torrent service keeps its downloads' state
+    // then; killed, the download is broken).
+    let all = procs();
+    let ours: std::collections::HashSet<i32> = all
+        .iter()
+        .filter(|p| is_named(&p.comm, &p.line, name))
+        .map(|p| p.pid)
+        .collect();
+    let pids: Vec<i32> = all
+        .iter()
+        .filter(|p| ours.contains(&p.pid) && !ours.contains(&p.ppid))
+        .map(|p| p.pid)
+        .collect();
+    if pids.is_empty() {
+        return true;
+    }
+    signal(&pids, libc::SIGTERM);
+    let t = std::time::Instant::now();
+    while t.elapsed() < Duration::from_secs(secs) {
+        std::thread::sleep(Duration::from_millis(500));
+        if !procs().iter().any(|p| is_named(&p.comm, &p.line, name)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Is this process the program `name`: by its own name, or an Electron
+/// app run by the system's Electron (Arch's Heroic is `electron
+/// /usr/lib/heroic-games-launcher/app.asar`), its main process only.
+fn is_named(comm: &str, line: &str, name: &str) -> bool {
+    comm == name
+        || (comm.starts_with("electron")
+            && !line.contains("--type=")
+            && line.split_whitespace().nth(1).is_some_and(|a| a.contains(name)))
+}
+
 /// Is a process with this name running? (Inside Flatpak asked of the host,
 /// at most once a second.)
 pub fn named(name: &str) -> bool {
     if crate::sandbox::flatpak() {
-        type Seen = Option<(std::time::Instant, Vec<String>)>;
+        type Seen = Option<(std::time::Instant, Vec<(String, String)>)>;
         static LAST: Mutex<Seen> = Mutex::new(None);
         let mut g = LAST.lock().unwrap_or_else(|e| e.into_inner());
         if g.as_ref()
@@ -343,17 +384,29 @@ pub fn named(name: &str) -> bool {
         {
             *g = Some((
                 std::time::Instant::now(),
-                procs().into_iter().map(|p| p.comm).collect(),
+                procs().into_iter().map(|p| (p.comm, p.line)).collect(),
             ));
         }
-        return g.as_ref().is_some_and(|(_, v)| v.iter().any(|c| c == name));
+        return g
+            .as_ref()
+            .is_some_and(|(_, v)| v.iter().any(|(c, l)| is_named(c, l, name)));
     }
-    procs().iter().any(|p| p.comm == name)
+    procs().iter().any(|p| is_named(&p.comm, &p.line, name))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn electron_apps_by_their_asar() {
+        let main = "/usr/lib/electron43/electron /usr/lib/heroic-games-launcher/app.asar";
+        assert!(is_named("electron", main, "heroic"));
+        assert!(is_named("heroic", "/opt/Heroic/heroic", "heroic"));
+        assert!(!is_named("electron", "/usr/lib/electron43/electron --type=gpu-process", "heroic"));
+        assert!(!is_named("electron", "/usr/lib/electron43/electron /usr/lib/code/out/cli.js", "heroic"));
+        assert!(!is_named("steamwebhelper", "steamwebhelper", "steam"));
+    }
 
     #[test]
     fn steam_states() {

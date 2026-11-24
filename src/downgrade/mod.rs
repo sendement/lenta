@@ -18,3 +18,4 @@ pub mod news;
 pub mod ops;
 pub mod pb;
 pub mod state;
+pub mod steamdb;

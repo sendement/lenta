@@ -195,7 +195,8 @@ impl App {
     pub fn sign_out(&mut self) {
         Account::forget();
         self.steam.account = None;
-        self.steam.more.retain(|g| g.installed);
+        self.steam.more
+            .retain(|g| g.installed || g.source != crate::game::Source::Steam);
         self.toast(tr("signed_out"));
     }
 

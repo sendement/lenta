@@ -11,7 +11,7 @@ A gamepad-first game launcher for Linux, written in Rust with egui.
 - **Game page** — Play, the Steam store description and details (developer,
   publisher, genres, release date, Metacritic), achievements with unlock
   dates, screenshots, play time and last launch.
-- **Library** — a tab per launcher (Steam, Heroic, Lutris) with shelves on
+- **Library** — a tab per launcher (Steam, Heroic, Lutris, Hydra) with shelves on
   the left: all, installed, favourites, collections, third-party,
   soundtracks. The last tab, **My collections**, holds the launcher's own
   collections across all launchers: plain ones (games put in by hand) and
@@ -28,10 +28,11 @@ A gamepad-first game launcher for Linux, written in Rust with egui.
 | Source | Games | Art | Play time | Extra |
 |---|---|---|---|---|
 | Steam (native, Flatpak) | installed apps from every library, non-Steam shortcuts | `appcache/librarycache`, custom `userdata/*/config/grid`, store CDN | `localconfig.vdf` | achievements from `appcache/stats` (local, no API key), store page via `appdetails` |
-| Heroic (native, Flatpak) | installed Epic, GOG, Amazon, side-loaded | library caches | `store/timestamp.json` | see below |
+| Heroic (native, Flatpak) | Epic, GOG, Amazon, side-loaded, installed per legendary/gogdl/nile's own lists; owned ones not installed too (Play opens Heroic's install) | library caches | `store/timestamp.json` | see below |
 | Lutris (native, Flatpak) | installed games from `pga.db` | covers, banners, icons | `pga.db` | see below |
+| Hydra | its library from `hydra-db` (LevelDB, read from a copy while Hydra runs); installed when it knows the program; Play on one being downloaded opens Hydra to resume it there (resumed from outside, Hydra 4.4's torrent service loses it), greyed out with nothing downloaded | Steam's store art | its own count | started through Hydra (`hydralauncher://run?…`), its prefix and Proton |
 
-Games from Heroic, Lutris and non-Steam shortcuts are matched to Steam's
+Games from Heroic, Lutris, Hydra and non-Steam shortcuts are matched to Steam's
 store: by the app id a Steam emulator's files carry (`steam_appid.txt`,
 `steam_emu.ini`, save folders) or else by title. The match brings the store
 description and screenshots, and fills missing art. When the game's Wine
@@ -39,8 +40,6 @@ prefix holds a Steam emulator's achievement save (CODEX, RUNE, EMPRESS,
 Goldberg/GSE, OnlineFix, RLD!…), the Achievements tab shows the full list
 from Steam (`IPlayerService/GetGameAchievements`, no key) with the ones in
 the save marked as earned, and how many Steam players have each.
-
-Planned: Hydra Launcher.
 
 ### Steam account and client (optional)
 
@@ -72,6 +71,41 @@ read-only, so Steam leaves the game alone; new builds are followed at each
 start. State and downloads are shared with
 [steam-downgrader](https://github.com/sendement/steam-downgrader)
 (`~/.local/share/steam-downgrader`), so either tool sees the other's locks.
+
+Builds this machine never had come from SteamDB: "Not in the list?
+Versions from SteamDB" at the end of the list opens the depot's manifests
+page (or the game's patch notes) in the browser; the table copied there is
+pasted back (Ctrl+V, or Paste, which reads the clipboard with `wl-paste`,
+`xclip` or `xsel`) and its manifests and builds join the list for good.
+
+### Installing, moving, uninstalling
+
+Y (right click) on a game: **Move to another library…** and
+**Uninstall…**; Play on a Steam game that isn't installed asks which
+library first. Settings → **Steam libraries** lists them with their free
+space: A on one moves all its games elsewhere, A on a drive without one
+makes a library there (`<drive>/SteamLibrary`).
+
+- **Install** writes the game's appmanifest ("update required") into the
+  library chosen; Steam, started in the tray, downloads it by itself and
+  the progress shows on the game's button.
+- **Move** takes the game, its Proton prefix, shader cache and Workshop
+  items: renamed on the same drive, copied (in the kernel, with progress,
+  cancellable from the game's menu) to another one while Steam keeps
+  running; Steam is closed only for the switch-over and started again. A
+  game locked by steam-downgrader stays read-only. exFAT/FAT drives take
+  native games only (no links or modes there for Proton prefixes).
+- **Uninstall** (Steam) removes the game, shader cache and Workshop items;
+  the Proton prefix stays, saves live in it. Heroic (Epic, GOG, Amazon) and
+  Lutris games are uninstalled as those launchers do it — the folder they
+  installed into deleted, their lists changed (Heroic is closed first);
+  games added to them by hand are only taken off their lists. A Hydra
+  game loses the folder it was installed into and Hydra's download of it,
+  unless the folder holds other games or is a shared one (`~/Games`);
+  Hydra is closed for it (its base is copied to `hydra-db.lenta-backup`
+  first), the game marked not installed, and Hydra started again in the
+  tray. Prefixes stay.
+- From the terminal: `lenta --move APPID FOLDER`.
 
 ### Proton
 
@@ -140,12 +174,13 @@ Modules, each game's own on its page, applied to the game's start) and
 | X / □ | Space | play at once |
 | B / ○ | Esc | back |
 | LB / RB | Q / E | previous / next section |
-| LT / RT | PgUp / PgDn | filter, game page tabs |
+| LT / RT | PgUp / PgDn | filter, game page tabs (also a sideways two-finger swipe) |
 | View | Tab | side panel |
 | Menu | F2 | settings |
 | | F11 | full screen |
 
-The pad is ignored while another window (a game) has focus.
+The pad is ignored while another window (a game) has focus. Power off,
+restart and log out are at the bottom of the side panel (asked first).
 
 ## Installing
 
