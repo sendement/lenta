@@ -49,8 +49,16 @@ pub fn scan(cfg: &Config) -> Vec<Game> {
     let h = std::thread::spawn(move || if heroic { heroic::games() } else { Vec::new() });
     let l = std::thread::spawn(move || if lutris { lutris::games() } else { Vec::new() });
     let y = std::thread::spawn(move || if hydra { hydra::games() } else { Vec::new() });
+    let own = cfg.own;
+    let o = std::thread::spawn(move || {
+        if own {
+            crate::progs::games()
+        } else {
+            Vec::new()
+        }
+    });
     let mut out = Vec::new();
-    for t in [s, h, l, y] {
+    for t in [s, h, l, y, o] {
         out.extend(t.join().unwrap_or_default());
     }
     // Games from elsewhere: a Steam emulator's files name the store id

@@ -1367,7 +1367,62 @@ fn manage_games() {
         progress,
         cancel: Default::default(),
         done: rx,
+        then: None,
     });
     snap(&mut h, &dir, "manage-job");
     h.state_mut().manage.job = None;
+}
+
+/// Own programs: the Own tab's tiles, the prefixes, the file browser and
+/// what-is-it question; nothing saved (closed with B).
+#[test]
+#[ignore]
+fn own_programs() {
+    use crate::app::Page;
+    use crate::ui::library::LibTab;
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    h.state_mut().go(Page::Library);
+    settle(&mut h, 5);
+    let tabs = h.state().lib_tabs();
+    let own = tabs
+        .iter()
+        .position(|t| *t == LibTab::Launcher(crate::game::Source::Own))
+        .expect("the Own tab, even empty");
+    h.state_mut().lib.filter = own;
+    h.state_mut().libv.side = false;
+    h.state_mut().lib.sel = 0;
+    settle(&mut h, 5);
+    snap(&mut h, &dir, "own-tab");
+    // The second tile: Prefixes.
+    h.state_mut().handle(Action::Right);
+    h.state_mut().handle(Action::Accept);
+    assert!(h.state().modals.choose.is_some(), "the prefixes");
+    snap(&mut h, &dir, "own-prefixes");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().modals.choose.is_none());
+    // The first: Add a program → the file browser on Downloads' places.
+    h.state_mut().handle(Action::Left);
+    h.state_mut().handle(Action::Accept);
+    assert!(h.state().modals.files.is_some(), "the file browser");
+    snap(&mut h, &dir, "own-files-places");
+    h.state_mut().handle(Action::Down);
+    h.state_mut().handle(Action::Accept);
+    settle(&mut h, 2);
+    snap(&mut h, &dir, "own-files-folder");
+    h.state_mut().handle(Action::Menu);
+    assert!(h.state().modals.files.is_none());
+    // A file chosen: what is it (an installer by its name: that first).
+    h.state_mut()
+        .program_file(PathBuf::from("/tmp/setup_fox_1.2.exe"), None);
+    snap(&mut h, &dir, "own-what-is-it");
+    h.state_mut().handle(Action::Back);
+    assert!(h.state().modals.choose.is_none());
 }

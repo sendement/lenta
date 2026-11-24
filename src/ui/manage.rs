@@ -64,7 +64,11 @@ pub struct Job {
     pub progress: Arc<Mutex<Progress>>,
     pub cancel: Arc<AtomicBool>,
     pub done: Receiver<Result<String, String>>,
+    /// Run when it's done (with how it went).
+    pub then: Option<Then>,
 }
+
+pub type Then = Box<dyn FnOnce(&mut App, &Result<String, String>)>;
 
 #[derive(Default)]
 pub struct Manage {
@@ -148,7 +152,7 @@ impl App {
         self.manage.pick = Some(Pick { what, sel, opts });
     }
 
-    fn busy(&mut self) -> bool {
+    pub(crate) fn busy(&mut self) -> bool {
         if let Some(j) = &self.manage.job {
             let l = j.label.clone();
             self.toast(format!("{}: {l}", tr("mg_busy")));
@@ -190,7 +194,7 @@ impl App {
             g.installed
                 && match g.source {
                     Source::Steam => g.key.starts_with("steam:") && g.steam_appid.is_some(),
-                    Source::Heroic | Source::Lutris | Source::Hydra => true,
+                    Source::Heroic | Source::Lutris | Source::Hydra | Source::Own => true,
                 }
         })
     }
@@ -262,7 +266,7 @@ impl App {
                     });
                 });
             }
-            Source::Heroic | Source::Lutris | Source::Hydra => {
+            Source::Heroic | Source::Lutris | Source::Hydra | Source::Own => {
                 let plan = match crate::uninstall::plan(&g) {
                     Ok(p) => p,
                     Err(e) => {
@@ -300,7 +304,8 @@ impl App {
                         }
                         let freed = crate::uninstall::run(&g, &plan);
                         if let Some(("Hydra", p)) = up {
-                            let _ = crate::game::run_first(&[vec![p.to_string(), "--hidden".into()]]);
+                            let _ =
+                                crate::game::run_first(&[vec![p.to_string(), "--hidden".into()]]);
                         }
                         let freed = freed?;
                         Ok(if plan.delete.is_some() || !plan.also.is_empty() {
@@ -322,6 +327,20 @@ impl App {
         job: impl FnOnce(&(dyn Fn(Progress) + Sync), &AtomicBool) -> Result<String, String>
         + Send
         + 'static,
+    ) {
+        self.start_job(key, label, job, |_, _| {});
+    }
+
+    /// A job on its thread, its card in the corner; `then` on this side
+    /// when it's done. Nothing is done under the dry run.
+    pub fn start_job(
+        &mut self,
+        key: Option<String>,
+        label: String,
+        job: impl FnOnce(&(dyn Fn(Progress) + Sync), &AtomicBool) -> Result<String, String>
+        + Send
+        + 'static,
+        then: impl FnOnce(&mut App, &Result<String, String>) + 'static,
     ) {
         let progress = Arc::new(Mutex::new(Progress::default()));
         let cancel = Arc::new(AtomicBool::new(false));
@@ -348,6 +367,7 @@ impl App {
             progress,
             cancel,
             done: rx,
+            then: Some(Box::new(then)),
         });
     }
 
@@ -506,10 +526,18 @@ impl App {
         else {
             return;
         };
-        let label = self.manage.job.take().map(|j| j.label).unwrap_or_default();
-        match r {
-            Ok(msg) => self.toast(msg),
+        let (label, then) = self
+            .manage
+            .job
+            .take()
+            .map(|j| (j.label, j.then))
+            .unwrap_or_default();
+        match &r {
+            Ok(msg) => self.toast(msg.clone()),
             Err(e) => self.toast(format!("{label}: {e}")),
+        }
+        if let Some(f) = then {
+            f(self, &r);
         }
         self.rescan();
     }

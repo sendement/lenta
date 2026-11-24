@@ -173,7 +173,10 @@ pub fn from_db(root: &Path, all: &[(String, Vec<u8>)]) -> Vec<Game> {
                     if matches!(s(d, "status"), Some("complete" | "seeding")) {
                         1.0
                     } else {
-                        d.get("progress").and_then(Value::as_f64).unwrap_or(0.0).min(0.999) as f32
+                        d.get("progress")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.0)
+                            .min(0.999) as f32
                     }
                 }),
             key: format!("hydra:{id}"),
@@ -242,7 +245,8 @@ pub mod tests {
         };
         let mut d = rusty_leveldb::DB::open(&db, opt).unwrap();
         for (k, v) in recs {
-            d.put(k.as_bytes(), &serde_json::to_vec(v).unwrap()).unwrap();
+            d.put(k.as_bytes(), &serde_json::to_vec(v).unwrap())
+                .unwrap();
         }
         d.flush().unwrap();
         d.close().unwrap();
@@ -294,10 +298,22 @@ pub mod tests {
         assert!(ds.installed);
         assert_eq!(ds.store_appid, Some(570940));
         assert_eq!(ds.playtime_min, Some(2));
-        assert_eq!(ds.install_dir.as_deref(), Some(t.join("Games/DSR").as_path()));
-        assert_eq!(ds.prefix.as_deref(), Some(t.join("wine-prefixes/570940").as_path()));
-        assert_eq!(ds.art.portrait, Some(Art::Url("https://x/cover.jpg".into())));
-        assert_eq!(ds.launch[0][1], "hydralauncher://run?shop=steam&objectId=570940");
+        assert_eq!(
+            ds.install_dir.as_deref(),
+            Some(t.join("Games/DSR").as_path())
+        );
+        assert_eq!(
+            ds.prefix.as_deref(),
+            Some(t.join("wine-prefixes/570940").as_path())
+        );
+        assert_eq!(
+            ds.art.portrait,
+            Some(Art::Url("https://x/cover.jpg".into()))
+        );
+        assert_eq!(
+            ds.launch[0][1],
+            "hydralauncher://run?shop=steam&objectId=570940"
+        );
         assert!(!g[1].installed);
         assert_eq!(g[1].dl, Some(0.96));
         assert_eq!(ds.dl, None);

@@ -177,13 +177,19 @@ pub fn games() -> Vec<Game> {
 pub fn installed_lists(root: &std::path::Path) -> HashMap<String, Option<PathBuf>> {
     let mut out = HashMap::new();
     let path = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(PathBuf::from);
-    if let Some(Value::Object(m)) = read_json(root.join("legendaryConfig/legendary/installed.json")) {
+    if let Some(Value::Object(m)) = read_json(root.join("legendaryConfig/legendary/installed.json"))
+    {
         for (app, v) in m {
             out.insert(app, path(&v, "install_path"));
         }
     }
     if let Some(v) = read_json(root.join("gog_store/installed.json")) {
-        for g in v.get("installed").and_then(Value::as_array).into_iter().flatten() {
+        for g in v
+            .get("installed")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(app) = g.get("appName").and_then(Value::as_str) {
                 out.insert(app.to_string(), path(g, "install_path"));
             }

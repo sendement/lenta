@@ -1,6 +1,7 @@
 pub mod about;
 pub mod artpick;
 pub mod card;
+pub mod choose;
 pub mod colledit;
 pub mod confirm;
 pub mod game_page;
@@ -11,6 +12,7 @@ pub mod manage;
 pub mod menu;
 pub mod modules;
 pub mod osk;
+pub mod progs;
 pub mod proton;
 pub mod ribbon;
 pub mod settings;

@@ -28,6 +28,10 @@ pub fn source_colors(s: Source) -> (Color32, Color32) {
             Color32::from_rgb(0x3d, 0xe0, 0xb0),
             Color32::from_rgb(0x12, 0x84, 0x8c),
         ),
+        Source::Own => (
+            Color32::from_rgb(0xff, 0x5f, 0x8f),
+            Color32::from_rgb(0xb0, 0x2a, 0x6e),
+        ),
     }
 }
 

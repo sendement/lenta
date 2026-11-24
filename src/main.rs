@@ -17,6 +17,7 @@ mod modules;
 mod music;
 mod net;
 mod power;
+mod progs;
 mod protonup;
 mod running;
 mod sandbox;

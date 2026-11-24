@@ -82,6 +82,12 @@ pub struct Config {
     pub heroic: bool,
     pub lutris: bool,
     pub hydra: bool,
+    /// Own programs (in prefixes made by Lenta).
+    pub own: bool,
+    /// Where new prefixes go (empty: ~/Games/Lenta/Prefixes).
+    pub prefix_root: String,
+    /// Pick files in the system's window (the portal) instead of Lenta's.
+    pub file_portal: bool,
     /// With a Steam account: the owned games that aren't installed, in
     /// the library.
     pub show_uninstalled: bool,
@@ -150,6 +156,9 @@ impl Default for Config {
             heroic: true,
             lutris: true,
             hydra: true,
+            own: true,
+            prefix_root: String::new(),
+            file_portal: false,
             show_uninstalled: true,
             theme_music: false,
             ui_sounds: true,

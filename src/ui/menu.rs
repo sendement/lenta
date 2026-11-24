@@ -39,6 +39,8 @@ enum Item {
     Move,
     Uninstall,
     CancelJob,
+    /// An own program's settings.
+    ProgSettings,
 }
 
 impl App {
@@ -70,6 +72,9 @@ impl App {
                 } else {
                     if self.can_move(key) {
                         v.push((Item::Move, tr("mg_move_dots").to_string(), None));
+                    }
+                    if g.source == crate::game::Source::Own {
+                        v.push((Item::ProgSettings, tr("pg_settings").to_string(), None));
                     }
                     if self.can_uninstall(key) {
                         v.push((Item::Uninstall, tr("mg_uninstall_dots").to_string(), None));
@@ -141,6 +146,10 @@ impl App {
             (Item::Move, MenuFor::Game(k)) => {
                 self.menu = None;
                 self.manage_move(&k);
+            }
+            (Item::ProgSettings, MenuFor::Game(k)) => {
+                self.menu = None;
+                self.program_settings(&k);
             }
             (Item::Uninstall, MenuFor::Game(k)) => {
                 self.menu = None;

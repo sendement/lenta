@@ -23,6 +23,7 @@
       <li>Proton versions per game, art from SteamGridDB, older game versions from Steam, more of them pasted from SteamDB</li>
       <li>Steam games installed, moved between libraries and drives, and uninstalled; Heroic, Lutris and Hydra games uninstalled</li>
       <li>Power off, restart and log out from the side panel</li>
+      <li>Own Windows programs: installers run in prefixes made here with Proton (through umu) or Wine, the program to run found, libraries through winetricks at one press</li>
       <li>External modules: own sections and per-game settings (a MangoHud example included)</li>
     </ul>
   </description>
@@ -39,6 +40,17 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.0" date="2026-11-24">
+      <description>
+        <ul>
+          <li>Own programs: install and run Windows programs in Wine prefixes made here, with Proton through umu or the system Wine</li>
+          <li>Prefixes: create, choose Proton or Wine, libraries through winetricks at one press, winecfg, run a file once</li>
+          <li>The program to run found after an install from its shortcuts or new files, or picked by hand</li>
+          <li>A file browser for the pad, or the system file window</li>
+          <li>Installers drawn through Wine's Wayland driver: no empty white window behind them</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-24">
       <description>
         <ul>

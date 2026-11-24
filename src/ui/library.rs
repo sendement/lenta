@@ -86,6 +86,9 @@ enum Item<'a> {
     /// "New collection".
     New,
     My(u64),
+    /// Own programs: add one, the prefixes.
+    AddProgram,
+    Prefixes,
 }
 
 /// A tile as the grid draws it (owned).
@@ -94,6 +97,8 @@ enum Tile {
     Coll(usize),
     New,
     My(u64),
+    AddProgram,
+    Prefixes,
 }
 
 /// A collection card's look: name, count, up to three covers, dynamic.
@@ -136,7 +141,7 @@ impl App {
     fn lib_sources(&self) -> Vec<Source> {
         Source::ALL
             .into_iter()
-            .filter(|s| !self.pool(*s).is_empty())
+            .filter(|s| !self.pool(*s).is_empty() || (*s == Source::Own && self.cfg.own))
             .collect()
     }
 
@@ -339,7 +344,7 @@ impl App {
                     }
                 })
                 .collect(),
-            Source::Hydra => Vec::new(),
+            Source::Hydra | Source::Own => Vec::new(),
             Source::Lutris | Source::Heroic => {
                 let cats = if src == Source::Lutris {
                     &self.shelves.lutris
@@ -473,10 +478,14 @@ impl App {
                 None => (0..colls.len()).map(Item::Coll).collect(),
             };
         }
-        self.shelf_games(src, shelf)
-            .into_iter()
-            .map(Item::Game)
-            .collect()
+        let games = self.shelf_games(src, shelf).into_iter().map(Item::Game);
+        if src == Source::Own && shelf == Shelf::All {
+            return [Item::AddProgram, Item::Prefixes]
+                .into_iter()
+                .chain(games)
+                .collect();
+        }
+        games.collect()
     }
 
     fn reset_grid(&mut self) {
@@ -501,6 +510,14 @@ impl App {
             Some(Item::My(id)) => {
                 let id = *id;
                 self.open_my(id);
+                return;
+            }
+            Some(Item::AddProgram) => {
+                self.add_program();
+                return;
+            }
+            Some(Item::Prefixes) => {
+                self.open_prefixes();
                 return;
             }
             None => None,
@@ -788,6 +805,8 @@ impl App {
                 Item::Coll(i) => Tile::Coll(i),
                 Item::New => Tile::New,
                 Item::My(id) => Tile::My(id),
+                Item::AddProgram => Tile::AddProgram,
+                Item::Prefixes => Tile::Prefixes,
             })
             .collect();
 
@@ -845,7 +864,36 @@ impl App {
                         self.draw_coll_tile(&p, r, s, selected, resp.hovered(), (c1, c2), pulse);
                     }
                 }
-                Tile::New => self.draw_new_tile(&p, r, selected, resp.hovered(), (c1, c2), pulse),
+                Tile::New => self.draw_new_tile(
+                    &p,
+                    r,
+                    selected,
+                    resp.hovered(),
+                    (c1, c2),
+                    pulse,
+                    "coll_new",
+                    false,
+                ),
+                Tile::AddProgram => self.draw_new_tile(
+                    &p,
+                    r,
+                    selected,
+                    resp.hovered(),
+                    (c1, c2),
+                    pulse,
+                    "pg_add",
+                    false,
+                ),
+                Tile::Prefixes => self.draw_new_tile(
+                    &p,
+                    r,
+                    selected,
+                    resp.hovered(),
+                    (c1, c2),
+                    pulse,
+                    "pg_prefixes",
+                    true,
+                ),
             }
             if let Tile::Game(g) = it {
                 let mut job = egui::text::LayoutJob::simple_singleline(
@@ -1005,7 +1053,9 @@ impl App {
         }
     }
 
-    /// "New collection": a plus on an empty card.
+    /// "New collection" (and the Own tab's "Add a program", "Prefixes"): a
+    /// plus, or lines, on an empty card.
+    #[allow(clippy::too_many_arguments)]
     fn draw_new_tile(
         &self,
         p: &egui::Painter,
@@ -1014,6 +1064,8 @@ impl App {
         hovered: bool,
         accent: (Color32, Color32),
         pulse: f32,
+        label: &str,
+        lines: bool,
     ) {
         let base = Rect::from_min_size(r.min, vec2(r.width(), r.height() - 46.0));
         p.rect_filled(
@@ -1046,12 +1098,20 @@ impl App {
         }
         let c = base.center();
         let st = Stroke::new(4.0, Color32::from_gray(if selected { 255 } else { 200 }));
-        p.line_segment([c - vec2(22.0, 0.0), c + vec2(22.0, 0.0)], st);
-        p.line_segment([c - vec2(0.0, 22.0), c + vec2(0.0, 22.0)], st);
+        if lines {
+            // A stack of glasses, for prefixes.
+            for k in -1..=1 {
+                let y = c.y + k as f32 * 14.0;
+                p.line_segment([pos2(c.x - 24.0, y), pos2(c.x + 24.0, y)], st);
+            }
+        } else {
+            p.line_segment([c - vec2(22.0, 0.0), c + vec2(22.0, 0.0)], st);
+            p.line_segment([c - vec2(0.0, 22.0), c + vec2(0.0, 22.0)], st);
+        }
         p.text(
             pos2(r.left() + 4.0, base.bottom() + 12.0),
             Align2::LEFT_TOP,
-            tr("coll_new"),
+            tr(label),
             FontId::proportional(17.0),
             Color32::from_gray(if selected { 255 } else { 220 }),
         );

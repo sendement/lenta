@@ -9,10 +9,18 @@ pub enum Source {
     Heroic,
     Lutris,
     Hydra,
+    /// Lenta's own programs, in prefixes made here.
+    Own,
 }
 
 impl Source {
-    pub const ALL: [Source; 4] = [Source::Steam, Source::Heroic, Source::Lutris, Source::Hydra];
+    pub const ALL: [Source; 5] = [
+        Source::Steam,
+        Source::Heroic,
+        Source::Lutris,
+        Source::Hydra,
+        Source::Own,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -20,6 +28,7 @@ impl Source {
             Source::Heroic => "Heroic",
             Source::Lutris => "Lutris",
             Source::Hydra => "Hydra",
+            Source::Own => crate::i18n::tr("src_own"),
         }
     }
 }

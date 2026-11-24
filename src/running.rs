@@ -369,7 +369,10 @@ fn is_named(comm: &str, line: &str, name: &str) -> bool {
     comm == name
         || (comm.starts_with("electron")
             && !line.contains("--type=")
-            && line.split_whitespace().nth(1).is_some_and(|a| a.contains(name)))
+            && line
+                .split_whitespace()
+                .nth(1)
+                .is_some_and(|a| a.contains(name)))
 }
 
 /// Is a process with this name running? (Inside Flatpak asked of the host,
@@ -403,8 +406,16 @@ mod tests {
         let main = "/usr/lib/electron43/electron /usr/lib/heroic-games-launcher/app.asar";
         assert!(is_named("electron", main, "heroic"));
         assert!(is_named("heroic", "/opt/Heroic/heroic", "heroic"));
-        assert!(!is_named("electron", "/usr/lib/electron43/electron --type=gpu-process", "heroic"));
-        assert!(!is_named("electron", "/usr/lib/electron43/electron /usr/lib/code/out/cli.js", "heroic"));
+        assert!(!is_named(
+            "electron",
+            "/usr/lib/electron43/electron --type=gpu-process",
+            "heroic"
+        ));
+        assert!(!is_named(
+            "electron",
+            "/usr/lib/electron43/electron /usr/lib/code/out/cli.js",
+            "heroic"
+        ));
         assert!(!is_named("steamwebhelper", "steamwebhelper", "steam"));
     }
 

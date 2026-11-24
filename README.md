@@ -11,7 +11,8 @@ A gamepad-first game launcher for Linux, written in Rust with egui.
 - **Game page** — Play, the Steam store description and details (developer,
   publisher, genres, release date, Metacritic), achievements with unlock
   dates, screenshots, play time and last launch.
-- **Library** — a tab per launcher (Steam, Heroic, Lutris, Hydra) with shelves on
+- **Library** — a tab per launcher (Steam, Heroic, Lutris, Hydra, your own
+  Windows programs) with shelves on
   the left: all, installed, favourites, collections, third-party,
   soundtracks. The last tab, **My collections**, holds the launcher's own
   collections across all launchers: plain ones (games put in by hand) and
@@ -106,6 +107,35 @@ makes a library there (`<drive>/SteamLibrary`).
   first), the game marked not installed, and Hydra started again in the
   tray. Prefixes stay.
 - From the terminal: `lenta --move APPID FOLDER`.
+
+### Own programs (Wine, Proton)
+
+The Library's **Own** tab holds Windows programs and games of your own,
+each in a Wine prefix made here (`~/Games/Lenta/Prefixes` by default,
+`prefix_root` in the settings file). **Add** picks a file — in Lenta's own
+browser (places, folders, only `.exe`/`.msi`/`.bat` unless Y shows all) or
+the system's window (Settings → Choose files in the system's window) —
+and asks what it is, the likelier first by its name:
+
+- **an installer**: run in a prefix (a new one, named, or one made
+  before), then what it installed is found — the programs its new
+  shortcuts point at, else its new programs (uninstallers, setups and
+  redistributables left out). One is added at once; several are offered
+  to choose from, with "Choose by hand…" in the prefix's drive C.
+- **the program itself**: added as it is, run in the prefix chosen.
+
+A prefix runs with a Proton (yours in `compatibilitytools.d`, the
+system's, Steam's own) through `umu-run` — with the umu id of the game's
+Steam match, so protonfixes apply — or with umu's own UMU-Proton, or the
+system's Wine (last in the list). **Prefixes** (that tile, or Settings)
+lists them: libraries through winetricks at one press (Visual C++ and
+DirectX basics, older Visual C++, .NET 4.8, core fonts, or verbs typed),
+a program installed there, another file run once (a patch), winecfg,
+Proton or Wine changed, its folder, deleting it (to the trash). A
+program's menu has **Settings…**: its name, program, arguments, prefix.
+Uninstalling one deletes the folder it was installed into inside the
+prefix (never Windows' own folders, nor one holding another program) and
+takes it off the list; the prefix stays.
 
 ### Proton
 

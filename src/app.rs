@@ -207,6 +207,7 @@ pub struct App {
     pub confirm: Option<crate::ui::confirm::Confirm>,
     /// Installing, moving, uninstalling: the place picker and the job.
     pub manage: crate::ui::manage::Manage,
+    pub modals: crate::ui::choose::Modals,
     /// The launcher's own collections.
     pub colls: crate::colls::Colls,
     /// Typing a text (the on-screen keyboard).
@@ -301,6 +302,7 @@ impl App {
             home_pick: (None, Instant::now()),
             confirm: None,
             manage: Default::default(),
+            modals: Default::default(),
             colls: crate::colls::Colls::load(),
             osk: None,
             menu: None,
@@ -518,6 +520,53 @@ impl App {
             self.manage_install(&k);
             return;
         }
+        // Own: its program gone, its settings to point at another; else
+        // run with the umu id of its Steam match (protonfixes), noted as
+        // played.
+        if g.source == Source::Own {
+            let key = g.key.clone();
+            if !g.installed {
+                self.toast(tr("pg_exe_missing"));
+                self.program_settings(&key);
+                return;
+            }
+            let id = crate::progs::gameid(g.store_appid);
+            let cmds: Vec<Vec<String>> = g
+                .launch
+                .iter()
+                .map(|c| {
+                    c.iter()
+                        .map(|a| {
+                            if a == "GAMEID=umu-default" {
+                                format!("GAMEID={id}")
+                            } else {
+                                a.clone()
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            let title = g.title.clone();
+            self.sfx.play(crate::sfx::Sound::Launch);
+            match crate::game::run_first(&cmds) {
+                Ok(()) => {
+                    if let Some(pid) = crate::progs::id_of(&key) {
+                        let _ = crate::progs::edit(|s| {
+                            if let Some(p) = s.programs.iter_mut().find(|p| p.id == pid) {
+                                p.last_played = crate::progs::now();
+                            }
+                        });
+                    }
+                    if let Some(g) = self.games.iter_mut().find(|g| g.key == key) {
+                        g.last_played = Some(crate::progs::now());
+                    }
+                    self.launching = Some((key, Instant::now()));
+                    self.toast(format!("{} {title}…", tr("launching")));
+                }
+                Err(e) => self.toast(format!("{} {title}: {e}", tr("launch_failed"))),
+            }
+            return;
+        }
         // Hydra's: nothing downloaded, nothing to do; a download is
         // resumed or installed in Hydra's window (from outside, its
         // torrent service loses track of it).
@@ -725,6 +774,8 @@ impl App {
             || self.versions.ask.is_some()
             || self.versions.import.is_some()
             || self.manage.pick.is_some()
+            || self.modals.choose.is_some()
+            || self.modals.files.is_some()
             || self.osk.is_some()
             || self.menu.is_some()
             || self.cedit.is_some()
@@ -920,6 +971,14 @@ impl App {
             self.manage_input(a);
             return;
         }
+        if self.modals.files.is_some() {
+            self.files_input(a);
+            return;
+        }
+        if self.modals.choose.is_some() {
+            self.choose_input(a);
+            return;
+        }
         if self.mods.over.is_some() {
             if self.modview_input(crate::ui::modules::Which::Over, a) {
                 self.mods.over = None;
@@ -1019,8 +1078,16 @@ impl App {
         if self.confirm.is_some() {
             return vec![(Btn::A, tr("yes")), (Btn::B, tr("cancel"))];
         }
-        if self.manage.pick.is_some() {
+        if self.manage.pick.is_some() || self.modals.choose.is_some() {
             return vec![(Btn::A, tr("choose")), (Btn::B, tr("back"))];
+        }
+        if self.modals.files.is_some() {
+            return vec![
+                (Btn::A, tr("open")),
+                (Btn::Y, tr("fp_toggle_all")),
+                (Btn::B, tr("fp_up")),
+                (Btn::Menu, tr("close")),
+            ];
         }
         if self.cedit.is_some() {
             return vec![
@@ -1202,8 +1269,19 @@ impl App {
             if self.cfg.sort != self.saved.sort {
                 self.resort();
             }
-            let sources_changed = (self.cfg.steam, self.cfg.heroic, self.cfg.lutris, self.cfg.hydra)
-                != (self.saved.steam, self.saved.heroic, self.saved.lutris, self.saved.hydra);
+            let sources_changed = (
+                self.cfg.steam,
+                self.cfg.heroic,
+                self.cfg.lutris,
+                self.cfg.hydra,
+                self.cfg.own,
+            ) != (
+                self.saved.steam,
+                self.saved.heroic,
+                self.saved.lutris,
+                self.saved.hydra,
+                self.saved.own,
+            );
             self.saved = self.cfg.clone();
             self.changed_at = Some(Instant::now());
             if sources_changed {
@@ -1435,6 +1513,13 @@ impl eframe::App for App {
                 if self.manage.pick.is_some() {
                     self.draw_manage_pick(ui, full);
                 }
+                if self.modals.choose.is_some() {
+                    self.draw_choose(ui, full);
+                }
+                if self.modals.files.is_some() {
+                    self.draw_files(ui, full);
+                }
+                self.pump_portal();
                 self.draw_manage_job(ui, full);
                 if self.cedit.is_some() {
                     self.draw_cedit(ui, full);

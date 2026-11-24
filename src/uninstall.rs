@@ -44,6 +44,7 @@ pub fn plan(g: &Game) -> Result<Plan, String> {
         Source::Heroic => heroic_plan(g),
         Source::Lutris => lutris_plan(g),
         Source::Hydra => hydra_plan(g),
+        Source::Own => own_plan(g),
         _ => Err("not here".into()),
     }
 }
@@ -69,6 +70,10 @@ pub fn run(g: &Game, plan: &Plan) -> Result<u64, String> {
         Source::Hydra => {
             let (root, id) = hydra_ids(g)?;
             hydra_forget(&root, &id, !plan.also.is_empty())?;
+        }
+        Source::Own => {
+            let id = crate::progs::id_of(&g.key).ok_or("bad key")?;
+            crate::progs::edit(|s| s.programs.retain(|p| p.id != id))?;
         }
         _ => return Err("not here".into()),
     }
@@ -241,6 +246,61 @@ pub fn lutris_forget(db: &Path, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+// -------------------------------------------------------------------- Own
+
+/// An own program: the folder it was installed into inside its prefix
+/// (not one of Windows' own, not one with another program in it); one
+/// outside the prefix (a portable one) is only taken off the list. The
+/// prefix stays (Prefixes deletes it).
+fn own_plan(g: &Game) -> Result<Plan, String> {
+    let id = crate::progs::id_of(&g.key).ok_or("bad key")?;
+    let s = crate::progs::Store::load();
+    let p = s.programs.iter().find(|p| p.id == id).ok_or("gone")?;
+    let drive = p.prefix.join("drive_c");
+    let dir = crate::sources::hydra::game_dir(&p.exe);
+    let windows = [
+        "drive_c",
+        "Program Files",
+        "Program Files (x86)",
+        "ProgramData",
+        "users",
+        "windows",
+        "Games",
+        "GOG Games",
+    ];
+    let ok = |d: &Path| {
+        d.starts_with(&drive)
+            && d != drive
+            && !d
+                .file_name()
+                .is_some_and(|n| windows.contains(&n.to_string_lossy().as_ref()))
+            && !s
+                .programs
+                .iter()
+                .any(|o| o.id != id && o.exe.starts_with(d))
+            && deletable(d)
+    };
+    let mut kept = vec![p.prefix.clone()];
+    let delete = match dir {
+        Some(d) if ok(&d) => Some(d),
+        Some(d) => {
+            if !d.starts_with(&p.prefix) {
+                kept.insert(0, d);
+            }
+            None
+        }
+        None => None,
+    };
+    Ok(Plan {
+        key: g.key.clone(),
+        bytes: delete.as_deref().map_or(0, crate::steamlib::tree_size),
+        delete,
+        also: Vec::new(),
+        kept,
+        close: None,
+    })
+}
+
 // ------------------------------------------------------------------ Hydra
 
 /// The Hydra folder the game is from and its id there ("steam:570940").
@@ -299,8 +359,16 @@ pub fn hydra_dirs(
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_lowercase();
-        ["games", "downloads", "загрузки", "steamlibrary", "common", "heroic", "hydra"]
-            .contains(&n.as_str())
+        [
+            "games",
+            "downloads",
+            "загрузки",
+            "steamlibrary",
+            "common",
+            "heroic",
+            "hydra",
+        ]
+        .contains(&n.as_str())
             || dirs::download_dir().is_some_and(|x| x == d)
     };
     let ok = |d: &Path| deletable(d) && !shared(d) && !others.iter().any(|o| o.starts_with(d));
@@ -363,7 +431,11 @@ pub fn hydra_forget(root: &Path, id: &str, download_gone: bool) -> Result<(), St
         }
     }
     if let Some(o) = g.as_object_mut() {
-        for k in ["executablePath", "installedSizeInBytes", "installerSizeInBytes"] {
+        for k in [
+            "executablePath",
+            "installedSizeInBytes",
+            "installerSizeInBytes",
+        ] {
             o.insert(k.into(), Value::Null);
         }
         o.insert("automaticCloudSync".into(), Value::Bool(false));
@@ -465,11 +537,26 @@ mod tests {
         crate::sources::hydra::tests::fake(
             &t,
             &[
-                ("!games!steam:1", json!({"title": "DSR", "executablePath": dsr})),
-                ("!games!steam:2", json!({"title": "PBZ", "executablePath": pbz})),
-                ("!games!steam:3", json!({"title": "Lone", "executablePath": lone})),
-                ("!downloads!steam:1", json!({"downloadPath": dl, "folderName": "[RG] Dark Souls"})),
-                ("!downloads!steam:2", json!({"downloadPath": dl, "folderName": "PBZ-Repack"})),
+                (
+                    "!games!steam:1",
+                    json!({"title": "DSR", "executablePath": dsr}),
+                ),
+                (
+                    "!games!steam:2",
+                    json!({"title": "PBZ", "executablePath": pbz}),
+                ),
+                (
+                    "!games!steam:3",
+                    json!({"title": "Lone", "executablePath": lone}),
+                ),
+                (
+                    "!downloads!steam:1",
+                    json!({"downloadPath": dl, "folderName": "[RG] Dark Souls"}),
+                ),
+                (
+                    "!downloads!steam:2",
+                    json!({"downloadPath": dl, "folderName": "PBZ-Repack"}),
+                ),
             ],
         );
         let all = hydra_records(&t).unwrap();
