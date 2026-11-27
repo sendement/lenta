@@ -40,6 +40,16 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4.0" date="2026-11-27">
+      <description>
+        <ul>
+          <li>Libraries at one press for any game with a prefix: Steam's through protontricks, Heroic's, Lutris's and Hydra's through winetricks; sets already there ticked</li>
+          <li>More sets: older Visual C++ 2005–2013, DirectX 10/11 and XInput, PhysX</li>
+          <li>Card shape set apart for Home and the Library</li>
+          <li>Add and Prefixes tiles as big as the game cards</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-24">
       <description>
         <ul>

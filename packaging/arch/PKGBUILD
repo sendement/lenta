@@ -1,6 +1,6 @@
 # Maintainer: Sendem <18467008+sendement@users.noreply.github.com>
 pkgname=lenta
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Gamepad-first game launcher: Steam, Heroic, Lutris and Hydra games on a ribbon of cards"
 arch=('x86_64')
@@ -27,6 +27,7 @@ optdepends=(
   'wl-clipboard: pasting SteamDB tables on Wayland'
   'umu-launcher: own Windows programs with Proton'
   'winetricks: libraries for own programs at one press'
+  'protontricks: libraries for Steam games at one press'
   'wine: own Windows programs with the system Wine'
   'zenity: the system file window for picking files'
   'mangohud: the MangoHud example module'
