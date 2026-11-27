@@ -1165,7 +1165,14 @@ impl App {
                 return self.launch_hints();
             }
             if v.focus == crate::ui::game_page::INSIDE && matches!(v.tab, Tab::Module(_)) {
-                return self.modview_hints(crate::ui::modules::Which::Game);
+                let mut h = self.modview_hints(crate::ui::modules::Which::Game);
+                if self
+                    .page_game()
+                    .is_some_and(|g| self.mod_group(&g).is_some())
+                {
+                    h.push((Btn::LB, tr("mod_group_switch")));
+                }
+                return h;
             }
             if v.focus == crate::ui::game_page::INSIDE && v.tab == Tab::Compat {
                 return vec![

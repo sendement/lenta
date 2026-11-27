@@ -1,0 +1,11 @@
+{
+  "id": "mods",
+  "name": { "en": "Mods", "ru": "Моды" },
+  "description": { "en": "Mods from archives and Nexus Mods, put into games without copying", "ru": "Моды из архивов и с Nexus Mods, подключаются к играм без копирования" },
+  "version": "0.1.0",
+  "exec": ["lenta-mods"],
+  "icon": "library",
+  "pages": true,
+  "show": "menu",
+  "game": { "label": { "en": "Mods", "ru": "Моды" }, "installed_only": true }
+}

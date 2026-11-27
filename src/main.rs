@@ -4,6 +4,7 @@ mod account;
 mod app;
 mod colls;
 mod config;
+mod dllmods;
 mod downgrade;
 mod fonts;
 mod game;

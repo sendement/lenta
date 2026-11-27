@@ -50,7 +50,10 @@ says which it prefers; your choice is kept in lenta's config.
   module that lives only on games' pages.
 - `show`: `"section"` (default) or `"menu"` (only in Modules).
 - `game`: `true`, or an object, for a tab on games' pages; `installed_only`
-  and `sources` (`steam`, `heroic`, `lutris`) narrow it down.
+  and `sources` (`steam`, `heroic`, `lutris`, `hydra`, `own`) narrow it down.
+  With two or more modules on a game's page their tabs are gathered into one,
+  **Modules**, with a row of them on top (LB/RB or a click between them);
+  Settings can give each its own tab again.
 
 ## The conversation
 
@@ -119,6 +122,8 @@ Every item may have `"hint"` (a second, smaller line) and `"disabled": true`.
 {"type": "button", "id": "test", "label": "Try it", "text": "Run"}
 {"type": "button", "id": "wipe", "label": "Forget everything", "text": "Reset", "danger": true}
 {"type": "link",   "page": "advanced", "label": "Advanced", "value": "3 set"}
+{"type": "file",   "id": "archive", "label": "Choose an archive…", "exts": [".zip", ".7z"], "start": "/home/me/Downloads"}
+{"type": "progress", "label": "Unpacking", "value": 0.4, "hint": "40%"}
 ```
 
 - `info` is a name and a value to read: `{"type": "info", "label": "Kernel", "value": "6.12"}`.
@@ -126,6 +131,13 @@ Every item may have `"hint"` (a second, smaller line) and `"disabled": true`.
   `"secret": true` it shows dots and the text isn't trimmed (passwords).
 - `danger` buttons ask first.
 - `link` opens the module's page by name; B goes back.
+- `file` opens lenta's file browser (or the system's window, as set): the
+  path chosen comes as `set`. `exts` narrows it to those files (Y shows all),
+  `start` is the folder it opens in (Downloads otherwise).
+- `progress` is a bar (`value` 0…1) with words beside it; answer with
+  `refresh` to have it asked again while the work goes on (work longer than
+  the 20 s an answer may take belongs to a program of its own the module
+  starts, its stdio not tied to lenta's pipes).
 
 ## Changing how a game starts
 
@@ -171,6 +183,12 @@ Pad: ↑ ↓ in the panel open the parts at once, → or A goes into the page,
 ← (on something without a value) or B comes back to the panel; LT/RT switch
 parts from anywhere. Icons: `wifi`, `bluetooth`, `sliders` and the ones
 above.
+
+## Modules that come with lenta
+
+`modules/mods` (the **Mods** module, a Rust program, `lenta-mods`) ships with
+the packages: in `/usr/share/lenta/modules/mods`, or inside the Flatpak,
+copied to your modules folder at start (modules run on the host).
 
 ## Trying it
 

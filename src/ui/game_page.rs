@@ -20,7 +20,7 @@ const SHOT_COLS: usize = 3;
 const MAINT_ROWS: usize = 2;
 
 impl App {
-    fn page_game(&self) -> Option<Game> {
+    pub(crate) fn page_game(&self) -> Option<Game> {
         self.game
             .as_ref()
             .and_then(|v| self.game_by_key(&v.key))
@@ -52,7 +52,10 @@ impl App {
         if self.has_launch_tab(g) {
             v.push(Tab::Launch);
         }
-        v.extend(self.mod_tabs(g));
+        match self.mod_group(g) {
+            Some(group) => v.push(Tab::Module(self.mod_group_pick(&group))),
+            None => v.extend(self.mod_tabs(g)),
+        }
         v
     }
 
@@ -142,6 +145,17 @@ impl App {
         let shots = self.shot_count();
         let Some(g) = self.page_game() else { return };
         let tabs = self.tabs_of(&g);
+        // The gathered Modules tab: LB/RB go through its modules.
+        if matches!(a, Action::PrevTab | Action::NextTab)
+            && let Some(Tab::Module(cur)) = self.game.as_ref().map(|v| v.tab)
+            && let Some(group) = self.mod_group(&g)
+        {
+            let n = group.len() as i32;
+            let at = group.iter().position(|i| *i == cur).unwrap_or(0) as i32;
+            let d = if a == Action::NextTab { 1 } else { -1 };
+            self.mod_group_show(group[(at + d).rem_euclid(n) as usize]);
+            return;
+        }
         let rows = self.tool_rows();
         let choices = self.tool_choices();
         // The row of the tool in use, to start the list on.
@@ -705,7 +719,10 @@ impl App {
                 },
                 Tab::Screenshots => tr("screenshots").to_string(),
                 Tab::Launch => tr("launch_tab").to_string(),
-                Tab::Module(i) => self.mod_tab_label(*i),
+                Tab::Module(i) => match self.mod_group(&g) {
+                    Some(group) => format!("{} · {}", tr("mod_group"), group.len()),
+                    None => self.mod_tab_label(*i),
+                },
             };
             let galley = p.layout_no_wrap(label, FontId::proportional(19.0), Color32::WHITE);
             let r = Rect::from_min_size(pos2(tx, row_y + 6.0), galley.size() + vec2(36.0, 22.0));
@@ -798,7 +815,24 @@ impl App {
             Tab::Launch => self.draw_launch(ui, body, &g, eased),
             Tab::Module(i) => {
                 let focus = self.game.as_ref().is_some_and(|v| v.focus == INSIDE);
-                self.draw_mod_tab(ui, body, &g, i, eased, focus)
+                match self.mod_group(&g) {
+                    Some(group) => {
+                        // The modules' row on top, scrolling with the page.
+                        let row = Rect::from_min_size(
+                            pos2(body.left(), body.top() - eased),
+                            vec2(body.width(), 34.0),
+                        );
+                        if row.bottom() > body.top()
+                            && let Some(k) = self.draw_mod_chips(ui, row, &group, i)
+                        {
+                            self.mod_group_show(k);
+                        }
+                        let rest =
+                            Rect::from_min_max(pos2(body.left(), body.top() + 50.0), body.max);
+                        50.0 + self.draw_mod_tab(ui, rest, &g, i, eased, focus)
+                    }
+                    None => self.draw_mod_tab(ui, body, &g, i, eased, focus),
+                }
             }
         };
         if let Some(v) = self.game.as_mut() {

@@ -816,6 +816,45 @@ pub fn tr(key: &str) -> &'static str {
         "pg_args" => ("Launch arguments", "Аргументы запуска"),
         "pg_change_runner" => ("Proton or Wine", "Proton или Wine"),
         "pg_delete_prefix" => ("Delete the prefix", "Удалить префикс"),
+        "mod_group" => ("Modules", "Модули"),
+        "mod_group_switch" => ("Module", "Модуль"),
+        "mod_group_set" => (
+            "Modules' tabs on a game's page as one",
+            "Вкладки модулей на странице игры — одной вкладкой",
+        ),
+        "pg_env" => ("Environment", "Переменные окружения"),
+        "pg_env_sub" => (
+            "NAME=value words: DXVK_HUD=fps, WINEDLLOVERRIDES=…",
+            "Через пробел ИМЯ=значение: DXVK_HUD=fps, WINEDLLOVERRIDES=…",
+        ),
+        "dm_menu" => ("DLL mods…", "Моды на DLL…"),
+        "dm_title" => ("DLL mods", "Моды на DLL"),
+        "dm_none" => (
+            "No DLL mods beside the game",
+            "Модов на DLL рядом с игрой не найдено",
+        ),
+        "dm_unknown" => ("DLL beside the game", "DLL рядом с игрой"),
+        "dm_own_note" => (
+            "Own programs: Lenta lets them load at every start (WINEDLLOVERRIDES)",
+            "Свои программы: Лента сама разрешает их загрузку при каждом запуске (WINEDLLOVERRIDES)",
+        ),
+        "dm_note" => (
+            "Wine loads its own DLLs of these names unless told; told in the prefix, for the game's programs only — no launch options needed",
+            "Wine грузит свои DLL с такими именами, пока ему не сказать; Лента пропишет это в префикс только для программ игры — параметры запуска не нужны",
+        ),
+        "dm_on" => ("Let them load", "Разрешить их загрузку"),
+        "dm_on_sub" => (
+            "Native first for these DLLs, in the prefix's registry",
+            "Сначала DLL игры, затем встроенные — в реестре префикса",
+        ),
+        "dm_off" => ("Take it back", "Убрать разрешение"),
+        "dm_off_sub" => ("Wine's own DLLs again", "Снова встроенные DLL Wine"),
+        "dm_allowed" => ("DLL mods will load", "Моды на DLL будут загружаться"),
+        "dm_taken" => ("DLL mods won't load", "Моды на DLL больше не загружаются"),
+        "dm_busy" => (
+            "Wine is running in this prefix: close the game (and its launcher) first",
+            "В этом префиксе работает Wine: сначала закройте игру (и её лаунчер)",
+        ),
         "pg_exe" => ("Program to run", "Запускаемый файл"),
         "pg_exe_missing" => (
             "Its program isn't there any more: choose it again",

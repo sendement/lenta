@@ -143,6 +143,47 @@ Uninstalling one deletes the folder it was installed into inside the
 prefix (never Windows' own folders, nor one holding another program) and
 takes it off the list; the prefix stays.
 
+### DLL mods (UE4SS, ReShade, OptiScaler…)
+
+Mods that come as a DLL beside the game — UE4SS (`dwmapi`), ReShade
+(`dxgi`, `d3d11`…), OptiScaler, Special K, ASI Loader, BepInEx
+(`winhttp`), MelonLoader, dgVoodoo — don't load under Wine by themselves:
+Wine takes its own DLL of that name. Lenta finds them (beside the program,
+in the install folder, in an Unreal game's `Binaries/Win64`):
+
+- **own programs**: let load at every start (`WINEDLLOVERRIDES`, joined
+  to one set in the program's **Environment**);
+- **any other game** (Steam, Heroic, Lutris, Hydra): a game's menu has
+  **DLL mods…** when there are some — what's there, and "Let them load",
+  which writes native-first loading for them into the game's prefix, for
+  the game's own programs only (`Software\Wine\AppDefaults\<exe>\DllOverrides`
+  in `user.reg`, a copy kept as `user.reg.lenta-backup`), so no launch
+  options are needed and it holds whoever starts the game. Not while Wine
+  runs in that prefix (it would write its registry over).
+
+### Mods (a module)
+
+The **Mods** module (shipped with lenta, `modules/mods`) is a mod manager
+on a game's page, made for the pad, without Electron:
+
+- **Add a mod** from an archive (zip, 7z, rar): the newest in Downloads,
+  Nexus downloads, or any file. Where it goes is worked out from what's
+  inside — an Unreal game's paks to `Content/Paks/~mods` (`LogicMods` for
+  Blueprint mods), UE4SS's Lua and C++ mods to `ue4ss/Mods/<name>` (turned on
+  with `enabled.txt`), UE4SS itself beside the program, BepInEx plugins to
+  `BepInEx/plugins`, an archive laid out like the game as it is; an archive
+  with variants in folders asks which. Unpacking runs on its own with its
+  progress on the page.
+- Mods are kept in the module's folder and **linked** into the game (hard
+  links; copies across drives): on, off and away at once; the game's own
+  files a mod replaces are kept and come back; files two mods share are
+  marked. Mods found in the game put there by hand (UE4SS mods, paks) can be
+  turned on and off too.
+- **Nexus Mods**: your API key (Modules → Mods), then the site's "Mod
+  Manager Download" button sends the file to lenta (without Premium that's
+  how Nexus lets a manager download); it lands in the game it's for when
+  that's known. A mod's page checks Nexus for a newer version.
+
 ### Proton
 
 The Proton page lists the compatibility tools installed (Steam's, custom,

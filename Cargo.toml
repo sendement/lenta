@@ -1,9 +1,12 @@
 [package]
 name = "lenta"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "MIT"
 description = "Gamepad-first game launcher: Steam, Heroic, Lutris and Hydra games on a ribbon of cards"
+
+[workspace]
+members = [".", "modules/mods"]
 
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }

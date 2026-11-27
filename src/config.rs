@@ -91,6 +91,8 @@ pub struct Config {
     pub prefix_root: String,
     /// Pick files in the system's window (the portal) instead of Lenta's.
     pub file_portal: bool,
+    /// Modules' tabs on a game's page gathered into one (two or more).
+    pub group_mod_tabs: bool,
     /// With a Steam account: the owned games that aren't installed, in
     /// the library.
     pub show_uninstalled: bool,
@@ -163,6 +165,7 @@ impl Default for Config {
             own: true,
             prefix_root: String::new(),
             file_portal: false,
+            group_mod_tabs: true,
             show_uninstalled: true,
             theme_music: false,
             ui_sounds: true,

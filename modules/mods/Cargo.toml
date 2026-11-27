@@ -1,0 +1,16 @@
+[package]
+name = "lenta-mods"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Mod manager module for lenta: mods from archives and Nexus Mods, put into games without copying"
+
+[[bin]]
+name = "lenta-mods"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "7"
+ureq = "3"

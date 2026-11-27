@@ -90,6 +90,47 @@ pub fn dirs() -> Vec<(PathBuf, bool)> {
     v
 }
 
+/// Modules that come inside lenta's Flatpak (`/app/share/lenta/modules`):
+/// they run on the host, which can't see in there, so each is copied to
+/// the user's modules folder, again when its version changes. One the user
+/// put there (not marked as copied) is left alone.
+pub fn sync_bundled() {
+    if !crate::sandbox::flatpak() {
+        return;
+    }
+    let Some(user) = ::dirs::data_dir().map(|d| d.join("lenta/modules")) else {
+        return;
+    };
+    let Ok(rd) = std::fs::read_dir("/app/share/lenta/modules") else {
+        return;
+    };
+    let version = |d: &Path| {
+        std::fs::read_to_string(d.join("module.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_string))
+    };
+    for e in rd.flatten() {
+        let from = e.path();
+        let to = user.join(e.file_name());
+        let ours = to.join(".bundled").is_file();
+        if to.symlink_metadata().is_ok() && (!ours || version(&to) == version(&from)) {
+            continue;
+        }
+        let _ = std::fs::create_dir_all(&to);
+        if let Ok(files) = std::fs::read_dir(&from) {
+            for f in files.flatten() {
+                let dst = to.join(f.file_name());
+                let tmp = to.join(format!(".{}.new", f.file_name().to_string_lossy()));
+                if std::fs::copy(f.path(), &tmp).is_ok() {
+                    let _ = std::fs::rename(&tmp, &dst);
+                }
+            }
+        }
+        let _ = std::fs::write(to.join(".bundled"), b"");
+    }
+}
+
 /// The user's modules folder (shown in Modules).
 pub fn user_dir() -> Option<PathBuf> {
     dirs().into_iter().find(|d| !d.1).map(|d| d.0)
@@ -352,6 +393,15 @@ pub enum Kind {
         value: String,
         secret: bool,
     },
+    /// How far something got (0..1), with words beside it.
+    Progress(f32),
+    /// A file chosen in lenta's browser (or the system's window): its
+    /// path comes as `set`.
+    File {
+        value: String,
+        exts: Vec<String>,
+        start: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -374,7 +424,11 @@ impl Item {
     }
 
     pub fn selectable(&self) -> bool {
-        !self.disabled && !matches!(self.kind, Kind::Header | Kind::Text | Kind::Info(_))
+        !self.disabled
+            && !matches!(
+                self.kind,
+                Kind::Header | Kind::Text | Kind::Info(_) | Kind::Progress(_)
+            )
     }
 }
 
@@ -431,6 +485,19 @@ fn item(v: &Value) -> Option<Item> {
         "link" => Kind::Link {
             page: v.get("page")?.as_str()?.to_string(),
             value: s("value"),
+        },
+        "progress" => Kind::Progress(num(v, "value", 0.0).clamp(0.0, 1.0) as f32),
+        "file" => Kind::File {
+            value: s("value"),
+            exts: v
+                .get("exts")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            start: s("start"),
         },
         "input" => Kind::Input {
             value: s("value"),

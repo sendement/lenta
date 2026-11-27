@@ -447,6 +447,107 @@ impl App {
         }
     }
 
+    /// DLL mods beside a game (from its menu): what's there; for an own
+    /// program they load by themselves, for another launcher's game their
+    /// loading is allowed (or taken back) in its prefix.
+    pub fn dll_mods(&mut self, key: &str) {
+        use crate::dllmods;
+        let Some(g) = self.game_by_key(key).cloned() else {
+            return;
+        };
+        let own = g.source == crate::game::Source::Own;
+        let exe = if own {
+            progs::id_of(key).and_then(|id| Store::load().program(id).map(|p| p.exe.clone()))
+        } else {
+            None
+        };
+        let found = dllmods::find(&dllmods::dirs_of(g.install_dir.as_deref(), exe.as_deref()));
+        if found.is_empty() {
+            self.toast(tr("dm_none"));
+            return;
+        }
+        let what = |f: &dllmods::Found| {
+            let kind = if f.kinds.is_empty() {
+                tr("dm_unknown").to_string()
+            } else {
+                f.kinds.join(", ")
+            };
+            let dlls: Vec<String> = f.dlls.iter().map(|d| format!("{d}.dll")).collect();
+            format!("{kind}: {}", dlls.join(", "))
+        };
+        let title = format!("{} «{}»", tr("dm_title"), g.title);
+        if own {
+            let rows: Vec<Row> = found
+                .iter()
+                .map(|f| Row::new(format!("{}   ✓", what(f)), f.dir.display().to_string()))
+                .collect();
+            self.choose(title, tr("dm_own_note"), rows, |_, _| {});
+            return;
+        }
+        let Some(prefix) = crate::maint::prefix(&g) else {
+            self.toast(tr("tk_no_prefix"));
+            return;
+        };
+        let reg = dllmods::user_reg(&prefix)
+            .and_then(|r| std::fs::read_to_string(r).ok())
+            .unwrap_or_default();
+        let all = found.iter().all(|f| dllmods::allowed(&reg, f));
+        let mut rows: Vec<Row> = found
+            .iter()
+            .map(|f| {
+                let on = dllmods::allowed(&reg, f);
+                Row::new(
+                    format!("{}{}", what(f), if on { "   ✓" } else { "" }),
+                    format!("{}  ·  {}", f.dir.display(), f.exes.join(", ")),
+                )
+            })
+            .collect();
+        let n = rows.len();
+        rows.push(Row::new(
+            if all { tr("dm_off") } else { tr("dm_on") },
+            if all {
+                tr("dm_off_sub")
+            } else {
+                tr("dm_on_sub")
+            },
+        ));
+        let key = key.to_string();
+        self.choose(title, tr("dm_note"), rows, move |app, i| {
+            if i < n {
+                return;
+            }
+            if app.is_running(&key) {
+                app.toast(tr("mg_close_game"));
+                return;
+            }
+            match dllmods::apply(&prefix, &found, !all) {
+                Ok(()) => app.toast(if all {
+                    tr("dm_taken")
+                } else {
+                    tr("dm_allowed")
+                }),
+                Err(e) => app.toast(format!("{}: {e}", tr("mg_failed"))),
+            }
+        });
+    }
+
+    pub fn can_dll_mods(&self, key: &str) -> bool {
+        let Some(g) = self.game_by_key(key) else {
+            return false;
+        };
+        if !g.installed {
+            return false;
+        }
+        let exe = (g.source == crate::game::Source::Own)
+            .then(|| progs::id_of(key))
+            .flatten()
+            .and_then(|id| Store::load().program(id).map(|p| p.exe.clone()));
+        crate::dllmods::any(crate::dllmods::dirs_of(
+            g.install_dir.as_deref(),
+            exe.as_deref(),
+        ))
+    }
+
     /// Libraries for a game's prefix, from its menu.
     pub fn game_tricks(&mut self, key: &str) {
         let Some(g) = self.game_by_key(key).cloned() else {
@@ -621,6 +722,14 @@ impl App {
                 },
             ),
             Row::new(
+                tr("pg_env"),
+                if prog.env.is_empty() {
+                    tr("pg_env_sub").to_string()
+                } else {
+                    prog.env.clone()
+                },
+            ),
+            Row::new(
                 format!("{}: {}", tr("pg_prefix"), pfx.name),
                 progs::runner_name(&pfx.runner),
             ),
@@ -665,7 +774,10 @@ impl App {
                         set(app, Box::new(move |x| x.args = t));
                     },
                 ),
-                3 => app.prefix_actions(pfx),
+                3 => app.type_text(tr("pg_env").to_string(), prog.env.clone(), move |app, t| {
+                    set(app, Box::new(move |x| x.env = t));
+                }),
+                4 => app.prefix_actions(pfx),
                 _ => app.pick_prefix(pfx.name.clone(), move |app, p| {
                     set(app, Box::new(move |x| x.prefix = p.path));
                 }),

@@ -47,6 +47,7 @@ pub enum S {
     Own,
     Prefixes,
     FilePortal,
+    GroupModTabs,
     Rescan,
     Account,
     Uninstalled,
@@ -114,6 +115,7 @@ const ROWS: &[Row] = &[
     Row::Item(S::Own),
     Row::Item(S::Prefixes),
     Row::Item(S::FilePortal),
+    Row::Item(S::GroupModTabs),
     Row::Item(S::Rescan),
     Row::Head("s_account"),
     Row::Item(S::Account),
@@ -162,6 +164,7 @@ fn kind(s: S) -> Kind {
         | S::Hydra
         | S::Own
         | S::FilePortal
+        | S::GroupModTabs
         | S::Uninstalled
         | S::ThemeMusic
         | S::ThemeMusicRibbon
@@ -209,6 +212,7 @@ fn label(s: S) -> &'static str {
         S::Own => "src_own_long",
         S::Prefixes => "pg_prefixes",
         S::FilePortal => "fp_portal",
+        S::GroupModTabs => "mod_group_set",
         S::Rescan => "rescan",
         S::Account => "account",
         S::Uninstalled => "show_uninstalled",
@@ -255,6 +259,7 @@ fn toggle_ref(c: &mut Config, s: S) -> Option<&mut bool> {
         S::Hydra => &mut c.hydra,
         S::Own => &mut c.own,
         S::FilePortal => &mut c.file_portal,
+        S::GroupModTabs => &mut c.group_mod_tabs,
         S::Uninstalled => &mut c.show_uninstalled,
         S::ThemeMusic => &mut c.theme_music,
         S::ThemeMusicRibbon => &mut c.theme_music_ribbon,

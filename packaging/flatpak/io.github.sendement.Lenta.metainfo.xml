@@ -25,6 +25,7 @@
       <li>Power off, restart and log out from the side panel</li>
       <li>Own Windows programs: installers run in prefixes made here with Proton (through umu) or Wine, the program to run found, libraries through winetricks at one press</li>
       <li>External modules: own sections and per-game settings (a MangoHud example included)</li>
+      <li>A mod manager module: mods from archives and Nexus Mods, linked into games without copying</li>
     </ul>
   </description>
   <launchable type="desktop-id">io.github.sendement.Lenta.desktop</launchable>
@@ -40,6 +41,17 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.0" date="2026-11-28">
+      <description>
+        <ul>
+          <li>Mods module: a mod manager on a game's page — mods from archives (Unreal paks, UE4SS Lua/C++ mods, UE4SS itself, BepInEx plugins) linked into the game, on and off at once, the game's own files kept; mods put in by hand shown and toggled</li>
+          <li>Nexus Mods: API key, "Mod Manager Download" links open in Lenta, update checks</li>
+          <li>DLL mods (UE4SS, ReShade, OptiScaler, BepInEx…) let load: by themselves for own programs, in the prefix for other games</li>
+          <li>Environment variables for own programs</li>
+          <li>Modules' tabs on a game's page gathered into one "Modules" tab</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-11-27">
       <description>
         <ul>

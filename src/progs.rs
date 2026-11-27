@@ -33,6 +33,8 @@ pub struct Program {
     pub title: String,
     pub exe: PathBuf,
     pub args: String,
+    /// Environment for it: `NAME=value` words (WINEDLLOVERRIDES, DXVK_…).
+    pub env: String,
     /// The prefix's folder.
     pub prefix: PathBuf,
     /// Unix seconds.
@@ -259,6 +261,35 @@ pub fn command(
         v.push(exe.into());
     }
     v.extend(args.iter().cloned());
+    v
+}
+
+/// The program's environment put into its command (after WINEPREFIX), DLL
+/// mods beside it let load (`WINEDLLOVERRIDES`, joined to one given).
+pub fn with_env(mut v: Vec<String>, env: &str, mods: Option<String>) -> Vec<String> {
+    if v.len() < 4 || v[0] != "env" {
+        return v;
+    }
+    let mut extra: Vec<String> = split_args(env)
+        .into_iter()
+        .filter(|kv| {
+            kv.split_once('=')
+                .is_some_and(|(k, _)| !k.is_empty() && !k.contains(' '))
+        })
+        .collect();
+    if let Some(m) = mods {
+        match extra
+            .iter_mut()
+            .find(|kv| kv.starts_with("WINEDLLOVERRIDES="))
+        {
+            Some(kv) => {
+                kv.push(';');
+                kv.push_str(&m);
+            }
+            None => extra.push(format!("WINEDLLOVERRIDES={m}")),
+        }
+    }
+    v.splice(4..4, extra);
     v
 }
 
@@ -591,12 +622,19 @@ pub fn games() -> Vec<Game> {
                 installed,
                 compat_id: None,
                 install_dir: p.exe.parent().map(Path::to_path_buf),
-                launch: vec![command(
-                    &p.prefix,
-                    &runner,
-                    &p.exe.display().to_string(),
-                    &split_args(&p.args),
-                    "umu-default",
+                launch: vec![with_env(
+                    command(
+                        &p.prefix,
+                        &runner,
+                        &p.exe.display().to_string(),
+                        &split_args(&p.args),
+                        "umu-default",
+                    ),
+                    &p.env,
+                    crate::dllmods::overrides(&crate::dllmods::find(&crate::dllmods::dirs_of(
+                        None,
+                        Some(&p.exe),
+                    ))),
                 )],
             }
         })
@@ -1072,6 +1110,20 @@ mod tests {
         assert_eq!(&w2[3..6], ["-u", "DISPLAY", "WINEPREFIX=/p"]);
         assert_eq!(on_wayland(w.clone(), "wine", false), w);
         assert!(split_args("\0").is_empty());
+        let e = with_env(
+            c.clone(),
+            "DXVK_HUD=fps WINEDLLOVERRIDES=\"winmm=n,b\" junk",
+            Some("dwmapi=n,b".into()),
+        );
+        assert_eq!(
+            &e[3..7],
+            [
+                "WINEPREFIX=/p",
+                "DXVK_HUD=fps",
+                "WINEDLLOVERRIDES=winmm=n,b;dwmapi=n,b",
+                "GAMEID=umu-570"
+            ]
+        );
         assert!(looks_like_installer(Path::new("/d/setup_fox_1.2.exe")));
         assert!(!looks_like_installer(Path::new("/d/Fox.exe")));
     }

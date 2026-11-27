@@ -41,8 +41,11 @@ modules:
         CARGO_HOME: /run/build/lenta/cargo
         CARGO_NET_OFFLINE: 'true'
     build-commands:
-      - cargo --offline build --release --locked
+      - cargo --offline build --release --locked --workspace
       - install -Dm755 target/release/lenta /app/bin/lenta
+      # Bundled modules (copied to the user's modules folder at start).
+      - install -Dm755 target/release/lenta-mods /app/share/lenta/modules/mods/lenta-mods
+      - install -Dm644 modules/mods/module.json /app/share/lenta/modules/mods/module.json
       - install -Dm644 packaging/flatpak/io.github.sendement.Lenta.desktop /app/share/applications/io.github.sendement.Lenta.desktop
       - install -Dm644 packaging/lenta.svg /app/share/icons/hicolor/scalable/apps/io.github.sendement.Lenta.svg
       - install -Dm644 packaging/flatpak/io.github.sendement.Lenta.metainfo.xml /app/share/metainfo/io.github.sendement.Lenta.metainfo.xml

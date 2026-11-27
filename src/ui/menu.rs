@@ -43,6 +43,8 @@ enum Item {
     ProgSettings,
     /// Libraries in its prefix (winetricks, protontricks).
     Tricks,
+    /// DLL mods beside it.
+    DllMods,
 }
 
 impl App {
@@ -80,6 +82,9 @@ impl App {
                     }
                     if self.can_tricks(key) {
                         v.push((Item::Tricks, tr("pg_tricks").to_string(), None));
+                    }
+                    if self.can_dll_mods(key) {
+                        v.push((Item::DllMods, tr("dm_menu").to_string(), None));
                     }
                     if self.can_uninstall(key) {
                         v.push((Item::Uninstall, tr("mg_uninstall_dots").to_string(), None));
@@ -151,6 +156,10 @@ impl App {
             (Item::Move, MenuFor::Game(k)) => {
                 self.menu = None;
                 self.manage_move(&k);
+            }
+            (Item::DllMods, MenuFor::Game(k)) => {
+                self.menu = None;
+                self.dll_mods(&k);
             }
             (Item::Tricks, MenuFor::Game(k)) => {
                 self.menu = None;

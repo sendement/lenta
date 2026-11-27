@@ -1426,3 +1426,103 @@ fn own_programs() {
     h.state_mut().handle(Action::Back);
     assert!(h.state().modals.choose.is_none());
 }
+
+/// The Mods module on a game's page, gathered with MangoHud into one
+/// Modules tab (LB/RB between them). Needs `cargo build -p lenta-mods`.
+#[test]
+#[ignore]
+fn mods_module() {
+    use crate::app::{Page, Tab};
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let Some(bin) = ["target/release/lenta-mods", "target/debug/lenta-mods"]
+        .iter()
+        .map(|b| root.join(b))
+        .find(|b| b.is_file())
+    else {
+        eprintln!("lenta-mods isn't built");
+        return;
+    };
+    // Both modules in one folder: MangoHud's example and Mods (with its
+    // program beside its module.json).
+    let d = cfg_dir().join("modules-mods");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("mods")).unwrap();
+    std::os::unix::fs::symlink(root.join("examples/modules/mangohud"), d.join("mangohud")).unwrap();
+    std::fs::copy(
+        root.join("modules/mods/module.json"),
+        d.join("mods/module.json"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&bin, d.join("mods/lenta-mods")).unwrap();
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    h.state_mut().mods = crate::ui::modules::Mods::load_from(vec![(d.clone(), false)]);
+    let Some(key) = h
+        .state()
+        .games
+        .iter()
+        .find(|g| g.key == "steam:2244210")
+        .or_else(|| h.state().games.iter().find(|g| g.steam_appid.is_some()))
+        .map(|g| g.key.clone())
+    else {
+        return;
+    };
+    h.state_mut().go(Page::Home);
+    h.state_mut().open_game(key.clone());
+    let g = h.state().game_by_key(&key).unwrap().clone();
+    let group = h.state().mod_group(&g).expect("two modules gathered");
+    assert_eq!(group.len(), 2);
+    let tabs = h.state().tabs_of(&g);
+    assert_eq!(
+        tabs.iter().filter(|t| matches!(t, Tab::Module(_))).count(),
+        1,
+        "one Modules tab"
+    );
+    // The Mods module first.
+    let mods_i = group
+        .iter()
+        .copied()
+        .find(|i| h.state().mods.list[*i as usize].id == "mods")
+        .unwrap();
+    h.state_mut().mod_group_show(mods_i);
+    let i = h
+        .state()
+        .tabs_of(&g)
+        .iter()
+        .position(|t| matches!(t, Tab::Module(_)))
+        .unwrap();
+    h.state_mut().game.as_mut().unwrap().focus = i + 1;
+    h.state_mut().handle(Action::Down);
+    let wait = |h: &mut Harness<'static, App>| {
+        for _ in 0..300 {
+            h.step();
+            if h.state()
+                .mods
+                .game
+                .as_ref()
+                .is_some_and(|v| v.page.is_some() && !v.busy())
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the module didn't answer");
+    };
+    wait(&mut h);
+    settle(&mut h, 4);
+    snap(&mut h, &dir, "mods-tab");
+    // RB: MangoHud in the same tab.
+    h.state_mut().handle(Action::NextTab);
+    wait(&mut h);
+    settle(&mut h, 4);
+    assert_ne!(h.state().game.as_ref().unwrap().tab, Tab::Module(mods_i));
+    snap(&mut h, &dir, "mods-group-next");
+    let _ = std::fs::remove_dir_all(&d);
+}

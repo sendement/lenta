@@ -42,10 +42,13 @@ pub struct Mods {
     /// The Modules section's choice and scroll.
     pub sel: usize,
     pub scroll: f32,
+    /// The module shown in a game's gathered "Modules" tab (its id).
+    pub pick: Option<String>,
 }
 
 impl Mods {
     pub fn load() -> Mods {
+        modules::sync_bundled();
         Mods::load_from(modules::dirs())
     }
 
@@ -59,6 +62,7 @@ impl Mods {
             game: None,
             sel: 0,
             scroll: 0.0,
+            pick: None,
         }
     }
 
@@ -99,6 +103,7 @@ enum Out {
     Ask(String, String),
     Open(String),
     Type(String, String, String, bool),
+    File(String, String, Vec<String>, String),
 }
 
 /// One of the launcher's icons, by the name a module gives.
@@ -147,6 +152,85 @@ impl App {
             .filter(|(_, m)| self.mod_cfg(m).on && m.game_tab(&src, g.installed).is_some())
             .map(|(i, _)| Tab::Module(i as u16))
             .collect()
+    }
+
+    /// Module tabs gathered into one ("Modules") on a game's page: the
+    /// modules, when there are two or more and that's set.
+    pub fn mod_group(&self, g: &Game) -> Option<Vec<u16>> {
+        let v: Vec<u16> = self
+            .mod_tabs(g)
+            .into_iter()
+            .filter_map(|t| match t {
+                Tab::Module(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        (self.cfg.group_mod_tabs && v.len() >= 2).then_some(v)
+    }
+
+    /// The one shown in the gathered tab: the one chosen last, else the first.
+    pub fn mod_group_pick(&self, group: &[u16]) -> u16 {
+        self.mods
+            .pick
+            .as_ref()
+            .and_then(|id| {
+                group
+                    .iter()
+                    .copied()
+                    .find(|i| self.mods.list.get(*i as usize).is_some_and(|m| &m.id == id))
+            })
+            .unwrap_or(group[0])
+    }
+
+    /// Show another module in the gathered tab.
+    pub fn mod_group_show(&mut self, i: u16) {
+        self.mods.pick = self.mods.list.get(i as usize).map(|m| m.id.clone());
+        if let Some(v) = self.game.as_mut() {
+            v.tab = Tab::Module(i);
+            v.scroll = 0.0;
+        }
+        self.sfx.play(crate::sfx::Sound::Navigate);
+    }
+
+    /// The row of the gathered modules over the tab; the one clicked.
+    pub fn draw_mod_chips(
+        &mut self,
+        ui: &mut Ui,
+        at: Rect,
+        group: &[u16],
+        cur: u16,
+    ) -> Option<u16> {
+        let p = ui.painter_at(at.expand2(vec2(0.0, 4.0)));
+        let (c1, _) = self.accent;
+        let mut x = at.left();
+        let mut clicked = None;
+        for (k, i) in group.iter().enumerate() {
+            let g = p.layout_no_wrap(
+                self.mod_tab_label(*i),
+                FontId::proportional(16.0),
+                Color32::WHITE,
+            );
+            let r = Rect::from_min_size(pos2(x, at.top()), vec2(g.size().x + 28.0, 34.0));
+            let resp = ui.interact(r, ui.id().with(("mod_chip", k)), Sense::click());
+            let on = *i == cur;
+            p.rect_filled(
+                r,
+                17.0,
+                if on {
+                    c1.gamma_multiply(0.75)
+                } else if resp.hovered() {
+                    Color32::from_white_alpha(28)
+                } else {
+                    Color32::from_white_alpha(12)
+                },
+            );
+            p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
+            if resp.clicked() {
+                clicked = Some(*i);
+            }
+            x = r.right() + 10.0;
+        }
+        clicked
     }
 
     pub fn mod_tab_label(&self, i: u16) -> String {
@@ -917,6 +1001,7 @@ impl App {
             let h = match it.kind {
                 Kind::Header => 46.0,
                 Kind::Info(_) => 44.0,
+                Kind::Progress(_) => 52.0,
                 Kind::Text => {
                     let g = p.layout(
                         it.label.clone(),
@@ -1010,6 +1095,33 @@ impl App {
                         FontId::proportional(15.0),
                         c1,
                     );
+                    continue;
+                }
+                Kind::Progress(f) => {
+                    let row = Rect::from_min_size(pos2(area.left(), top), vec2(area.width(), h));
+                    p.text(
+                        pos2(row.left() + 20.0, row.top() + 6.0),
+                        Align2::LEFT_TOP,
+                        &it.label,
+                        FontId::proportional(16.0),
+                        Color32::from_gray(220),
+                    );
+                    if !it.hint.is_empty() {
+                        p.text(
+                            pos2(row.right() - 16.0, row.top() + 6.0),
+                            Align2::RIGHT_TOP,
+                            &it.hint,
+                            FontId::proportional(14.0),
+                            Color32::from_gray(160),
+                        );
+                    }
+                    let bar = Rect::from_min_max(
+                        pos2(row.left() + 20.0, row.bottom() - 16.0),
+                        pos2(row.right() - 16.0, row.bottom() - 8.0),
+                    );
+                    p.rect_filled(bar, 4.0, Color32::from_white_alpha(25));
+                    let done = Rect::from_min_size(bar.min, vec2(bar.width() * *f, bar.height()));
+                    p.rect_filled(done, 4.0, c1);
                     continue;
                 }
                 Kind::Info(value) => {
@@ -1205,7 +1317,7 @@ impl App {
                     p.rect_filled(r, r.height() / 2.0, fill);
                     p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
                 }
-                Kind::Link { value, .. } => {
+                Kind::Link { value, .. } | Kind::File { value, .. } => {
                     p.text(
                         pos2(vr.right(), vr.center().y),
                         Align2::RIGHT_CENTER,
@@ -1249,7 +1361,7 @@ impl App {
                         Color32::WHITE,
                     );
                 }
-                Kind::Header | Kind::Text | Kind::Info(_) => {}
+                Kind::Header | Kind::Text | Kind::Info(_) | Kind::Progress(_) => {}
             }
             if it.disabled {
                 continue;
@@ -1410,6 +1522,9 @@ impl App {
             (Kind::Button { danger: true, .. }, Act::Press) => Some(Out::Ask(id, it.label.clone())),
             (Kind::Button { .. }, Act::Press) => Some(Out::Press(id)),
             (Kind::Link { page, .. }, Act::Press | Act::Step(1)) => Some(Out::Open(page.clone())),
+            (Kind::File { exts, start, .. }, Act::Press) => {
+                Some(Out::File(id, it.label.clone(), exts.clone(), start.clone()))
+            }
             (Kind::Input { value, secret }, Act::Press) => {
                 Some(Out::Type(id, it.label.clone(), value.clone(), *secret))
             }
@@ -1439,6 +1554,17 @@ impl App {
                 self.ask(label, Vec::new(), tr("yes"), move |app| {
                     if let Some(v) = app.view_mut(w) {
                         v.press(&id);
+                    }
+                });
+            }
+            Out::File(id, label, exts, start) => {
+                let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
+                let start = (!start.is_empty())
+                    .then(|| std::path::PathBuf::from(&start))
+                    .or_else(dirs::download_dir);
+                self.pick_file(label, &exts, start, move |app, path| {
+                    if let Some(v) = app.view_mut(w) {
+                        v.set(&id, json!(path.display().to_string()));
                     }
                 });
             }
@@ -1569,9 +1695,9 @@ impl App {
                 Kind::Toggle(_) => out.push((Btn::A, tr("mod_toggle"))),
                 Kind::Slider { .. } | Kind::Choice { .. } => out.push((Btn::Dpad, tr("change"))),
                 Kind::Button { .. } => out.push((Btn::A, tr("mod_press"))),
-                Kind::Link { .. } => out.push((Btn::A, tr("open"))),
+                Kind::Link { .. } | Kind::File { .. } => out.push((Btn::A, tr("open"))),
                 Kind::Input { .. } => out.push((Btn::A, tr("mod_type"))),
-                Kind::Header | Kind::Text | Kind::Info(_) => {}
+                Kind::Header | Kind::Text | Kind::Info(_) | Kind::Progress(_) => {}
             }
         }
         let deep = self.view(w).is_some_and(|v| v.stack.len() > 1);
