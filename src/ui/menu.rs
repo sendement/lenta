@@ -41,6 +41,8 @@ enum Item {
     CancelJob,
     /// An own program's settings.
     ProgSettings,
+    /// Libraries in its prefix (winetricks, protontricks).
+    Tricks,
 }
 
 impl App {
@@ -75,6 +77,9 @@ impl App {
                     }
                     if g.source == crate::game::Source::Own {
                         v.push((Item::ProgSettings, tr("pg_settings").to_string(), None));
+                    }
+                    if self.can_tricks(key) {
+                        v.push((Item::Tricks, tr("pg_tricks").to_string(), None));
                     }
                     if self.can_uninstall(key) {
                         v.push((Item::Uninstall, tr("mg_uninstall_dots").to_string(), None));
@@ -146,6 +151,14 @@ impl App {
             (Item::Move, MenuFor::Game(k)) => {
                 self.menu = None;
                 self.manage_move(&k);
+            }
+            (Item::Tricks, MenuFor::Game(k)) => {
+                self.menu = None;
+                if self.is_running(&k) {
+                    self.toast(tr("mg_close_game"));
+                } else {
+                    self.game_tricks(&k);
+                }
             }
             (Item::ProgSettings, MenuFor::Game(k)) => {
                 self.menu = None;

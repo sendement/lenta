@@ -304,6 +304,14 @@ pub fn tricks(prefix: &Path, runner: &str, verbs: &[String]) -> Vec<String> {
     ];
     if runner == "wine" {
         v.push("winetricks".into());
+    } else if let Some(bin) = runner.strip_prefix("wine:") {
+        // Another Wine (Heroic's, Lutris's): winetricks told which.
+        v.push(format!("WINE={bin}"));
+        let server = Path::new(bin).with_file_name("wineserver");
+        if server.is_file() {
+            v.push(format!("WINESERVER={}", server.display()));
+        }
+        v.push("winetricks".into());
     } else {
         v.push("GAMEID=umu-default".into());
         if !runner.is_empty() {
@@ -318,12 +326,163 @@ pub fn tricks(prefix: &Path, runner: &str, verbs: &[String]) -> Vec<String> {
 }
 
 /// The sets of libraries offered at one press: (i18n key, verbs).
-pub const TRICKS: [(&str, &[&str]); 4] = [
+pub const TRICKS: [(&str, &[&str]); 6] = [
     ("tk_base", &["vcrun2022", "d3dcompiler_47", "d3dx9", "xact"]),
-    ("tk_vc_old", &["vcrun2010", "vcrun2012", "vcrun2013"]),
+    (
+        "tk_vc_old",
+        &[
+            "vcrun2005",
+            "vcrun2008",
+            "vcrun2010",
+            "vcrun2012",
+            "vcrun2013",
+        ],
+    ),
+    ("tk_dx", &["d3dx10", "d3dx11_43", "xinput", "xact_x64"]),
+    ("tk_physx", &["physx"]),
     ("tk_dotnet", &["dotnet48"]),
     ("tk_fonts", &["corefonts"]),
 ];
+
+/// Where libraries go: a prefix with what runs it, or a Steam game's
+/// (through protontricks, which finds its Proton and prefix itself).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Tricks {
+    Prefix {
+        name: String,
+        path: PathBuf,
+        runner: String,
+    },
+    Steam {
+        name: String,
+        appid: u32,
+        prefix: PathBuf,
+    },
+}
+
+impl Tricks {
+    pub fn name(&self) -> &str {
+        match self {
+            Tricks::Prefix { name, .. } | Tricks::Steam { name, .. } => name,
+        }
+    }
+
+    pub fn prefix(&self) -> &Path {
+        match self {
+            Tricks::Prefix { path, .. } => path,
+            Tricks::Steam { prefix, .. } => prefix,
+        }
+    }
+
+    /// What runs these verbs.
+    pub fn argv(&self, verbs: &[String]) -> Vec<String> {
+        match self {
+            Tricks::Prefix { path, runner, .. } => tricks(path, runner, verbs),
+            Tricks::Steam { appid, .. } => {
+                let mut v = vec!["protontricks".to_string(), appid.to_string(), "-q".into()];
+                v.extend(verbs.iter().cloned());
+                v
+            }
+        }
+    }
+
+    /// The program it needs.
+    pub fn tool(&self) -> &'static str {
+        match self {
+            Tricks::Steam { .. } => "protontricks",
+            Tricks::Prefix { runner, .. } if runner == "wine" || runner.starts_with("wine:") => {
+                "winetricks"
+            }
+            Tricks::Prefix { .. } => "umu-run",
+        }
+    }
+}
+
+/// What winetricks has put in a prefix (its log; Proton's prefixes keep
+/// it under pfx/).
+pub fn installed_verbs(prefix: &Path) -> BTreeSet<String> {
+    [
+        prefix.join("winetricks.log"),
+        prefix.join("pfx/winetricks.log"),
+    ]
+    .iter()
+    .filter_map(|p| std::fs::read_to_string(p).ok())
+    .flat_map(|s| {
+        s.lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty() && !l.starts_with('-'))
+            .collect::<Vec<_>>()
+    })
+    .collect()
+}
+
+/// Where a game's libraries go, by its launcher: a Steam game through
+/// protontricks; Heroic's with the Proton or Wine set for it there;
+/// Lutris's with the system Wine; Hydra's with umu's Proton; own ones
+/// with their prefix's. None without a prefix (a Steam game never run).
+pub fn tricks_for(g: &Game) -> Option<Tricks> {
+    let name = g.title.clone();
+    match g.source {
+        Source::Steam => {
+            let appid = g.compat_id?;
+            let prefix = crate::maint::prefix(g)?;
+            Some(Tricks::Steam {
+                name,
+                appid,
+                prefix,
+            })
+        }
+        Source::Own => {
+            let s = Store::load();
+            let p = s.program(id_of(&g.key)?)?;
+            let runner = s
+                .prefix(&p.prefix)
+                .map(|x| x.runner.clone())
+                .unwrap_or_default();
+            Some(Tricks::Prefix {
+                name,
+                path: p.prefix.clone(),
+                runner,
+            })
+        }
+        Source::Heroic => {
+            let path = g.prefix.clone().filter(|p| p.is_dir())?;
+            let app = g.key.rsplit(':').next()?;
+            Some(Tricks::Prefix {
+                name,
+                path,
+                runner: heroic_runner(app).unwrap_or_else(|| "wine".into()),
+            })
+        }
+        Source::Lutris => Some(Tricks::Prefix {
+            name,
+            path: g.prefix.clone().filter(|p| p.is_dir())?,
+            runner: "wine".into(),
+        }),
+        Source::Hydra => Some(Tricks::Prefix {
+            name,
+            path: g.prefix.clone().filter(|p| p.is_dir())?,
+            runner: String::new(),
+        }),
+    }
+}
+
+/// The Wine or Proton Heroic runs a game with (its GamesConfig).
+fn heroic_runner(app: &str) -> Option<String> {
+    for (root, _) in crate::sources::heroic::roots() {
+        let Ok(t) = std::fs::read_to_string(root.join(format!("GamesConfig/{app}.json"))) else {
+            continue;
+        };
+        let v: serde_json::Value = serde_json::from_str(&t).ok()?;
+        let w = v.get(app)?.get("wineVersion")?;
+        let bin = w.get("bin")?.as_str()?;
+        return Some(match w.get("type").and_then(|t| t.as_str()) {
+            Some("proton") => Path::new(bin).parent()?.display().to_string(),
+            _ => format!("wine:{bin}"),
+        });
+    }
+    None
+}
 
 /// Split typed arguments on spaces, keeping "quoted parts" together.
 pub fn split_args(s: &str) -> Vec<String> {
@@ -840,6 +999,35 @@ mod tests {
         let f = found(&t, &before, &after);
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].title, "Fox Editor");
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn tricks_targets() {
+        let s = Tricks::Steam {
+            name: "x".into(),
+            appid: 570,
+            prefix: "/c/570".into(),
+        };
+        assert_eq!(
+            s.argv(&["vcrun2022".into()]),
+            ["protontricks", "570", "-q", "vcrun2022"]
+        );
+        assert_eq!(s.tool(), "protontricks");
+        let h = Tricks::Prefix {
+            name: "h".into(),
+            path: "/p".into(),
+            runner: "wine:/opt/w/bin/wine".into(),
+        };
+        let v = h.argv(&["d3dx9".into()]);
+        assert!(v.contains(&"WINE=/opt/w/bin/wine".to_string()));
+        assert_eq!(&v[v.len() - 3..], ["winetricks", "-q", "d3dx9"]);
+        assert_eq!(h.tool(), "winetricks");
+        let t = std::env::temp_dir().join(format!("lenta-tlog-{}", std::process::id()));
+        std::fs::create_dir_all(t.join("pfx")).unwrap();
+        std::fs::write(t.join("pfx/winetricks.log"), "vcrun2022\nd3dx9\n").unwrap();
+        let have = installed_verbs(&t);
+        assert!(have.contains("vcrun2022") && have.contains("d3dx9") && !have.contains("xact"));
         let _ = std::fs::remove_dir_all(&t);
     }
 

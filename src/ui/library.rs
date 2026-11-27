@@ -785,7 +785,7 @@ impl App {
         let cell = if showing_colls {
             vec2(300.0, 230.0)
         } else {
-            match self.cfg.shape {
+            match self.cfg.lib_shape {
                 Shape::Portrait => vec2(160.0, 240.0),
                 Shape::Landscape => vec2(260.0, 260.0 * 215.0 / 460.0),
             }
@@ -873,6 +873,7 @@ impl App {
                     pulse,
                     "coll_new",
                     false,
+                    false,
                 ),
                 Tile::AddProgram => self.draw_new_tile(
                     &p,
@@ -883,6 +884,7 @@ impl App {
                     pulse,
                     "pg_add",
                     false,
+                    true,
                 ),
                 Tile::Prefixes => self.draw_new_tile(
                     &p,
@@ -892,6 +894,7 @@ impl App {
                     (c1, c2),
                     pulse,
                     "pg_prefixes",
+                    true,
                     true,
                 ),
             }
@@ -1066,8 +1069,14 @@ impl App {
         pulse: f32,
         label: &str,
         lines: bool,
+        card: bool,
     ) {
-        let base = Rect::from_min_size(r.min, vec2(r.width(), r.height() - 46.0));
+        // Among games: a card's size, its name under it as theirs.
+        let base = if card {
+            r
+        } else {
+            Rect::from_min_size(r.min, vec2(r.width(), r.height() - 46.0))
+        };
         p.rect_filled(
             base,
             16.0,
@@ -1108,11 +1117,16 @@ impl App {
             p.line_segment([c - vec2(22.0, 0.0), c + vec2(22.0, 0.0)], st);
             p.line_segment([c - vec2(0.0, 22.0), c + vec2(0.0, 22.0)], st);
         }
+        let (at, align) = if card {
+            (pos2(r.center().x, r.bottom() + 8.0), Align2::CENTER_TOP)
+        } else {
+            (pos2(r.left() + 4.0, base.bottom() + 12.0), Align2::LEFT_TOP)
+        };
         p.text(
-            pos2(r.left() + 4.0, base.bottom() + 12.0),
-            Align2::LEFT_TOP,
+            at,
+            align,
             tr(label),
-            FontId::proportional(17.0),
+            FontId::proportional(if card { 14.0 } else { 17.0 }),
             Color32::from_gray(if selected { 255 } else { 220 }),
         );
     }
@@ -1138,7 +1152,7 @@ impl App {
             Rect::from_center_size(r.center(), r.size() * grow),
             self.cfg.rounding * 0.7,
         );
-        let (fill, has_art) = ribbon::fill_for(&mut self.images, g, self.cfg.shape, pose.size);
+        let (fill, has_art) = ribbon::fill_for(&mut self.images, g, self.cfg.lib_shape, pose.size);
         card::shadow(p, &pose, 1.0);
         if selected {
             card::glow(p, &pose, c1, c2, self.cfg.glow * 0.7, 0.75 + 0.25 * pulse);

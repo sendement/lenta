@@ -11,6 +11,9 @@ use crate::i18n::tr;
 use crate::progs::{self, Found, Prefix, Program, Store};
 use crate::ui::choose::Row;
 
+/// Where B goes from a list.
+type Back = Box<dyn FnOnce(&mut App)>;
+
 const RUNNABLE: [&str; 3] = [".exe", ".msi", ".bat"];
 
 impl App {
@@ -369,7 +372,18 @@ impl App {
         ];
         let title = format!("{} «{}»", tr("pg_prefix"), p.name);
         self.choose(title, "", rows, move |app, i| match i {
-            0 => app.pick_tricks(p),
+            0 => {
+                let q = p.clone();
+                let t = progs::Tricks::Prefix {
+                    name: p.name.clone(),
+                    path: p.path.clone(),
+                    runner: p.runner.clone(),
+                };
+                app.pick_tricks(
+                    t,
+                    Some(Box::new(move |app: &mut App| app.prefix_actions(q))),
+                );
+            }
             1 => {
                 let q = p.clone();
                 app.pick_file(
@@ -433,65 +447,103 @@ impl App {
         }
     }
 
-    fn pick_tricks(&mut self, p: Prefix) {
-        let mut rows: Vec<Row> = progs::TRICKS
-            .iter()
-            .map(|(k, verbs)| Row::new(tr(k), verbs.join(" ")))
-            .collect();
-        rows.push(Row::new(tr("tk_own"), tr("tk_own_sub")));
-        let has = crate::sandbox::has_program("winetricks") || p.runner != "wine";
-        if !has {
-            self.toast(tr("tk_no_winetricks"));
+    /// Libraries for a game's prefix, from its menu.
+    pub fn game_tricks(&mut self, key: &str) {
+        let Some(g) = self.game_by_key(key).cloned() else {
+            return;
+        };
+        match progs::tricks_for(&g) {
+            Some(t) => self.pick_tricks(t, None),
+            None => self.toast(tr("tk_no_prefix")),
+        }
+    }
+
+    pub fn can_tricks(&self, key: &str) -> bool {
+        self.game_by_key(key).is_some_and(|g| {
+            g.installed
+                && (g.prefix.is_some()
+                    || g.compat_id.is_some()
+                    || g.source == crate::game::Source::Own)
+        })
+    }
+
+    /// The sets at one press (marked when winetricks' log has them all),
+    /// or verbs typed.
+    fn pick_tricks(&mut self, t: progs::Tricks, back: Option<Back>) {
+        if !crate::sandbox::has_program(t.tool()) {
+            self.toast(format!("{}: {}", tr("tk_missing"), t.tool()));
             return;
         }
-        let title = format!("{} «{}»", tr("pg_tricks"), p.name);
-        let q = p.clone();
-        self.choose(
-            title,
-            tr("tk_note"),
-            rows,
-            move |app, i| match progs::TRICKS.get(i) {
+        let have = progs::installed_verbs(t.prefix());
+        let mut rows: Vec<Row> = progs::TRICKS
+            .iter()
+            .map(|(k, verbs)| {
+                let done = verbs.iter().all(|v| have.contains(*v));
+                let title = if done {
+                    format!("{}   ✓", tr(k))
+                } else {
+                    tr(k).to_string()
+                };
+                Row::new(title, verbs.join(" "))
+            })
+            .collect();
+        rows.push(Row::new(tr("tk_own"), tr("tk_own_sub")));
+        let title = format!("{} «{}»", tr("pg_tricks"), t.name());
+        let note = match &t {
+            progs::Tricks::Steam { .. } => tr("tk_note_steam"),
+            _ => tr("tk_note"),
+        };
+        self.choose(title, note, rows, move |app, i| {
+            match progs::TRICKS.get(i) {
                 Some((k, verbs)) => {
                     let v: Vec<String> = verbs.iter().map(|s| s.to_string()).collect();
-                    app.run_tricks(p, v, tr(k).to_string());
+                    app.run_tricks(t, v, tr(k).to_string());
                 }
                 None => {
-                    app.type_text(tr("tk_own").to_string(), String::new(), move |app, t| {
-                        let v = progs::split_args(&t);
+                    app.type_text(tr("tk_own").to_string(), String::new(), move |app, txt| {
+                        let v = progs::split_args(&txt);
                         if !v.is_empty() {
                             let label = v.join(" ");
-                            app.run_tricks(p, v, label);
+                            app.run_tricks(t, v, label);
                         }
                     });
                 }
-            },
-        );
-        self.choose_back(move |app| app.prefix_actions(q));
+            }
+        });
+        if let Some(b) = back {
+            self.choose_back(b);
+        }
     }
 
-    fn run_tricks(&mut self, p: Prefix, verbs: Vec<String>, what: String) {
+    fn run_tricks(&mut self, t: progs::Tricks, verbs: Vec<String>, what: String) {
         if self.busy() {
             return;
         }
-        let label = format!("{} «{}»: {what}", tr("tk_installing"), p.name);
+        let label = format!("{} «{}»: {what}", tr("tk_installing"), t.name());
         self.start_job(
             None,
             label,
             move |report, _| {
-                if !p.path.join("drive_c").is_dir() {
+                if let progs::Tricks::Prefix { name, path, runner } = &t
+                    && !path.join("drive_c").is_dir()
+                {
                     report(crate::steamlib::Progress {
                         done: 0,
                         total: 0,
                         stage: "pg_making_prefix",
                     });
-                    progs::make_prefix(&p)?;
+                    progs::make_prefix(&Prefix {
+                        name: name.clone(),
+                        path: path.clone(),
+                        runner: runner.clone(),
+                    })?;
                 }
                 report(crate::steamlib::Progress {
                     done: 0,
                     total: 0,
                     stage: "tk_running",
                 });
-                progs::run_wait(&progs::tricks(&p.path, &p.runner, &verbs))?;
+                progs::run_wait(&t.argv(&verbs))?;
                 Ok(tr("tk_done").to_string())
             },
             |_, _| {},

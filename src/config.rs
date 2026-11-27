@@ -56,7 +56,10 @@ pub struct Config {
     pub reverse: bool,
     pub anchor: Anchor,
     pub sort: Sort,
+    /// Cards on Home (the ribbon).
     pub shape: Shape,
+    /// Cards in the Library's grid.
+    pub lib_shape: Shape,
     /// Card height (portrait) or width (landscape), in points.
     pub card_size: f32,
     pub spacing: f32,
@@ -135,6 +138,7 @@ impl Default for Config {
             anchor: Anchor::Center,
             sort: Sort::Recent,
             shape: Shape::Portrait,
+            lib_shape: Shape::Portrait,
             card_size: 300.0,
             spacing: 28.0,
             selected_scale: 1.25,

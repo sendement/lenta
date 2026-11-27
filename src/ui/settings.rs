@@ -23,6 +23,7 @@ pub enum S {
     Anchor,
     Sort,
     Shape,
+    LibShape,
     Size,
     Spacing,
     SelScale,
@@ -73,6 +74,7 @@ const ROWS: &[Row] = &[
     Row::Item(S::Sort),
     Row::Head("s_cards"),
     Row::Item(S::Shape),
+    Row::Item(S::LibShape),
     Row::Item(S::Size),
     Row::Item(S::Spacing),
     Row::Item(S::SelScale),
@@ -183,6 +185,7 @@ fn label(s: S) -> &'static str {
         S::Anchor => "anchor",
         S::Sort => "sort",
         S::Shape => "shape",
+        S::LibShape => "lib_shape",
         S::Size => "card_size",
         S::Spacing => "spacing",
         S::SelScale => "sel_scale",
@@ -287,6 +290,7 @@ fn choice_step(c: &mut Config, s: S, d: i32) {
         S::Anchor => c.anchor = cycle(&[Anchor::Center, Anchor::Start], c.anchor, d),
         S::Sort => c.sort = cycle(&[Sort::Recent, Sort::Name, Sort::Playtime], c.sort, d),
         S::Shape => c.shape = cycle(&[Shape::Portrait, Shape::Landscape], c.shape, d),
+        S::LibShape => c.lib_shape = cycle(&[Shape::Portrait, Shape::Landscape], c.lib_shape, d),
         S::TiltMode => c.tilt_mode = cycle(&[TiltMode::Flow, TiltMode::Fan], c.tilt_mode, d),
         S::SoundPack => {
             // Steam's own, then the installed packs.
@@ -337,7 +341,7 @@ fn choice_text(c: &Config, s: S) -> &'static str {
             Sort::Name => "sort_name",
             Sort::Playtime => "sort_time",
         },
-        S::Shape => match c.shape {
+        S::Shape | S::LibShape => match if s == S::Shape { c.shape } else { c.lib_shape } {
             Shape::Portrait => "portrait",
             Shape::Landscape => "landscape",
         },

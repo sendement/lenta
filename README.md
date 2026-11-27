@@ -129,9 +129,15 @@ system's, Steam's own) through `umu-run` — with the umu id of the game's
 Steam match, so protonfixes apply — or with umu's own UMU-Proton, or the
 system's Wine (last in the list). **Prefixes** (that tile, or Settings)
 lists them: libraries through winetricks at one press (Visual C++ and
-DirectX basics, older Visual C++, .NET 4.8, core fonts, or verbs typed),
+DirectX basics, older Visual C++, DirectX 10/11 and XInput, PhysX, .NET
+4.8, core fonts, or verbs typed),
 a program installed there, another file run once (a patch), winecfg,
-Proton or Wine changed, its folder, deleting it (to the trash). A
+Proton or Wine changed, its folder, deleting it (to the trash). Any
+game with a prefix has **Libraries (winetricks)…** in its menu too:
+Steam's through `protontricks` (into its Proton prefix), Heroic's with the
+Proton or Wine set for it there, Lutris's with the system Wine, Hydra's
+with umu's Proton; sets already in a prefix (its `winetricks.log`) are
+ticked. A
 program's menu has **Settings…**: its name, program, arguments, prefix.
 Uninstalling one deletes the folder it was installed into inside the
 prefix (never Windows' own folders, nor one holding another program) and
