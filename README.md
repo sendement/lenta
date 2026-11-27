@@ -40,7 +40,13 @@ description and screenshots, and fills missing art. When the game's Wine
 prefix holds a Steam emulator's achievement save (CODEX, RUNE, EMPRESS,
 Goldberg/GSE, OnlineFix, RLD!…), the Achievements tab shows the full list
 from Steam (`IPlayerService/GetGameAchievements`, no key) with the ones in
-the save marked as earned, and how many Steam players have each.
+the save marked as earned, and how many Steam players have each. While such
+a game runs, every achievement it earns pops up as a desktop notification
+(`notify-send`) with its name, description and icon. Own programs look for
+the app id above `Binaries/Win64`-like folders too, take one typed in their
+settings (Steam ID) when the files name none, and show the list unearned
+until the emulator writes its first save; the id also goes to umu as
+`GAMEID=umu-<id>` for that game's protonfixes.
 
 ### Steam account and client (optional)
 

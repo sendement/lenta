@@ -194,6 +194,10 @@ pub struct App {
     pub running: crate::running::Shared,
     /// The games that thread looks at.
     watch: std::sync::Arc<std::sync::Mutex<Vec<crate::running::Watch>>>,
+    /// Games whose emulator keeps achievements, watched while they run.
+    ach_watch: std::sync::Arc<std::sync::Mutex<Vec<crate::achwatch::Item>>>,
+    /// Games that earned an achievement since last drawn.
+    pub ach_earned: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Running when last drawn (one ending brings lenta back).
     pub was_running: std::collections::HashSet<String>,
     /// A sideways touchpad swipe: how far it went, and whether it has
@@ -282,8 +286,23 @@ impl App {
             Default::default();
         let rctx = ctx.clone();
         let running_shared = crate::running::spawn(watch.clone(), move || rctx.request_repaint());
+        let ach_watch: std::sync::Arc<std::sync::Mutex<Vec<crate::achwatch::Item>>> =
+            Default::default();
+        let ach_earned: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>> =
+            Default::default();
+        {
+            let (earned, actx) = (ach_earned.clone(), ctx.clone());
+            crate::achwatch::spawn(ach_watch.clone(), running_shared.clone(), move |k| {
+                if let Ok(mut e) = earned.lock() {
+                    e.insert(k);
+                }
+                actx.request_repaint();
+            });
+        }
         let music_ctx = ctx.clone();
         let mut app = App {
+            ach_watch,
+            ach_earned,
             images: Images::new(ctx.clone()),
             store: Store::new(ctx.clone()),
             ctx,
@@ -433,6 +452,32 @@ impl App {
                         key: g.key.clone(),
                         appid: g.steam_appid,
                         dir: g.install_dir.clone(),
+                    })
+                    .collect();
+            }
+            if let Ok(mut w) = self.ach_watch.lock() {
+                *w = self
+                    .games
+                    .iter()
+                    .filter(|g| g.installed && g.steam_appid.is_none())
+                    .filter_map(|g| {
+                        let e = g.emu.as_ref();
+                        let appid = e.map(|e| e.appid).or(g.store_appid)?;
+                        let mut files: Vec<std::path::PathBuf> =
+                            e.map(|e| e.file.clone()).into_iter().collect();
+                        // An own program's emulator writes its first
+                        // save during play.
+                        if g.source == Source::Own
+                            && let Some(p) = &g.prefix
+                        {
+                            files.extend(crate::sources::emu::candidates(p, appid));
+                        }
+                        (!files.is_empty()).then(|| crate::achwatch::Item {
+                            key: g.key.clone(),
+                            title: g.title.clone(),
+                            appid,
+                            files,
+                        })
                     })
                     .collect();
             }

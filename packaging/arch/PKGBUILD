@@ -1,6 +1,6 @@
 # Maintainer: Sendem <18467008+sendement@users.noreply.github.com>
 pkgname=lenta
-pkgver=0.5.0
+pkgver=0.6.0
 pkgrel=1
 pkgdesc="Gamepad-first game launcher: Steam, Heroic, Lutris and Hydra games on a ribbon of cards"
 arch=('x86_64')

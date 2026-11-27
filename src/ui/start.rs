@@ -406,6 +406,14 @@ impl App {
     /// Every frame: a game that ended brings lenta back to the front (and
     /// to full screen, which Steam's windows may have taken).
     pub fn running_tick(&mut self) {
+        let earned: Vec<String> = self
+            .ach_earned
+            .lock()
+            .map(|mut e| e.drain().collect())
+            .unwrap_or_default();
+        for k in earned {
+            self.store.forget_achievements_of(&k);
+        }
         let now: std::collections::HashSet<String> = self
             .running
             .lock()

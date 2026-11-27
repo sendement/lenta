@@ -40,6 +40,9 @@ pub struct Program {
     /// Unix seconds.
     pub last_played: u64,
     pub added: u64,
+    /// The Steam app id the user gave (achievements, protonfixes); found
+    /// from the game's files when none.
+    pub steam_id: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -606,6 +609,15 @@ pub fn games() -> Vec<Game> {
                 .map(|x| x.runner.clone())
                 .unwrap_or_default();
             let installed = p.exe.is_file();
+            let dir = p.exe.parent().map(Path::to_path_buf);
+            let (appid, emu) = if installed {
+                let (id, save) =
+                    crate::sources::emu::resolve_as(Some(&p.prefix), dir.as_deref(), p.steam_id);
+                let save = save.or_else(|| crate::sources::emu::save_of(&p.prefix, id?));
+                (id, save)
+            } else {
+                (p.steam_id, None)
+            };
             Game {
                 dl: None,
                 key: game_key(p.id),
@@ -616,12 +628,12 @@ pub fn games() -> Vec<Game> {
                 playtime_min: None,
                 last_played: (p.last_played > 0).then_some(p.last_played),
                 steam_appid: None,
-                store_appid: None,
-                emu: None,
+                store_appid: appid,
+                emu,
                 prefix: Some(p.prefix.clone()),
                 installed,
                 compat_id: None,
-                install_dir: p.exe.parent().map(Path::to_path_buf),
+                install_dir: dir,
                 launch: vec![with_env(
                     command(
                         &p.prefix,

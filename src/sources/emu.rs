@@ -87,6 +87,76 @@ pub fn saves(prefix: &Path) -> Vec<Save> {
     out
 }
 
+/// Where emulators would put this game's achievements once it earns the
+/// first one (nothing is there before).
+pub fn candidates(prefix: &Path, appid: u32) -> Vec<PathBuf> {
+    let c = prefix.join("drive_c");
+    let id = appid.to_string();
+    let mut users = subdirs(&c.join("users"));
+    users.retain(|u| u.file_name().is_some_and(|n| n != "Public"));
+    if users.is_empty() {
+        users.push(c.join("users/steamuser"));
+    }
+    let mut out = Vec::new();
+    for u in &users {
+        let r = u.join("AppData/Roaming");
+        out.push(r.join("GSE Saves").join(&id).join("achievements.json"));
+        out.push(
+            r.join("Goldberg SteamEmu Saves")
+                .join(&id)
+                .join("achievements.json"),
+        );
+        out.push(
+            r.join("EMPRESS")
+                .join(&id)
+                .join("remote")
+                .join(&id)
+                .join("achievements.json"),
+        );
+        out.push(r.join("Steam/CODEX").join(&id).join("achievements.ini"));
+        out.push(
+            u.join("Documents/Steam/CODEX")
+                .join(&id)
+                .join("achievements.ini"),
+        );
+    }
+    let public = c.join("users/Public/Documents");
+    for g in ["CODEX", "RUNE", "EMPRESS"] {
+        out.push(
+            public
+                .join("Steam")
+                .join(g)
+                .join(&id)
+                .join("achievements.ini"),
+        );
+    }
+    out.push(
+        public
+            .join("OnlineFix")
+            .join(&id)
+            .join("Stats/Achievements.ini"),
+    );
+    out.push(
+        c.join("ProgramData/Steam/RLD!")
+            .join(&id)
+            .join("stats/achievements.ini"),
+    );
+    out
+}
+
+/// The save of `appid` in `prefix`, when one is there by now.
+pub fn save_of(prefix: &Path, appid: u32) -> Option<Save> {
+    saves(prefix)
+        .into_iter()
+        .find(|s| s.appid == appid)
+        .or_else(|| {
+            candidates(prefix, appid)
+                .into_iter()
+                .find(|f| f.is_file())
+                .map(|file| Save { appid, file })
+        })
+}
+
 /// The Steam app id a game folder names: steam_appid.txt, or an
 /// emulator's settings (AppId=…). Looks a few levels down.
 pub fn appid_in(dir: &Path) -> Option<u32> {
@@ -137,10 +207,55 @@ fn ini_appid(p: &Path) -> Option<u32> {
     })
 }
 
+/// Folders games keep their exe in below their own (Binaries/Win64…).
+fn is_bin_dir(d: &Path) -> bool {
+    const SUB: [&str; 12] = [
+        "bin", "bin32", "bin64", "binaries", "win32", "win64", "x86", "x64", "x86_64", "retail",
+        "release", "shipping",
+    ];
+    d.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| SUB.contains(&n.to_lowercase().as_str()))
+}
+
+/// [`appid_in`] of the exe's folder, then up past Binaries/Win64-like
+/// folders and one more (the game's own root) — never into the folder
+/// that holds other games too.
+pub fn appid_near(dir: &Path) -> Option<u32> {
+    let mut d = dir;
+    let mut climbed = false;
+    loop {
+        if let Some(id) = appid_in(d) {
+            return Some(id);
+        }
+        if is_bin_dir(d) {
+            climbed = true;
+            d = d.parent()?;
+        } else if climbed {
+            d = d.parent()?;
+            if is_bin_dir(d) {
+                return None;
+            }
+            return appid_in(d);
+        } else {
+            return None;
+        }
+    }
+}
+
 /// This game's app id and emulator save, from its prefix and folder. A
 /// prefix shared by several games needs the folder's id to pick one.
 pub fn resolve(prefix: Option<&Path>, dir: Option<&Path>) -> (Option<u32>, Option<Save>) {
-    let from_dir = dir.and_then(appid_in);
+    resolve_as(prefix, dir, None)
+}
+
+/// [`resolve`], with the app id given by the user when there is one.
+pub fn resolve_as(
+    prefix: Option<&Path>,
+    dir: Option<&Path>,
+    id: Option<u32>,
+) -> (Option<u32>, Option<Save>) {
+    let from_dir = id.or_else(|| dir.and_then(appid_near));
     let all = prefix.map(saves).unwrap_or_default();
     let save = match from_dir {
         Some(id) => all.into_iter().find(|s| s.appid == id),
@@ -265,6 +380,38 @@ mod tests {
         );
         assert_eq!(m.len(), 1);
         assert_eq!(m.get("A"), Some(&5));
+    }
+
+    #[test]
+    fn save_shows_up_later() {
+        let t = std::env::temp_dir().join(format!("lenta-emu-later-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(t.join("drive_c/users/steamuser/AppData/Roaming/GSE Saves"))
+            .unwrap();
+        assert_eq!(save_of(&t, 42), None);
+        let f = candidates(&t, 42)[0].clone();
+        assert!(f.ends_with("GSE Saves/42/achievements.json"));
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, r#"{"A":{"earned":true,"earned_time":5}}"#).unwrap();
+        assert_eq!(save_of(&t, 42).map(|s| s.file), Some(f));
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn id_above_binaries() {
+        let t = std::env::temp_dir().join(format!("lenta-emu-up-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let win64 = t.join("Games/Some/Game/Binaries/Win64");
+        std::fs::create_dir_all(&win64).unwrap();
+        std::fs::write(t.join("Games/Some/steam_appid.txt"), "4242\n").unwrap();
+        assert_eq!(appid_near(&win64), Some(4242));
+        // A game right in Games/ doesn't look at its neighbours.
+        let other = t.join("Games/Other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::create_dir_all(t.join("Games/Third")).unwrap();
+        std::fs::write(t.join("Games/Third/steam_appid.txt"), "7").unwrap();
+        assert_eq!(appid_near(&other), None);
+        let _ = std::fs::remove_dir_all(&t);
     }
 
     #[test]

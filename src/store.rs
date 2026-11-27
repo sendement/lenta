@@ -88,10 +88,17 @@ impl Store {
     /// emulator's save matched to the store's list for one from elsewhere.
     pub fn achievements(&mut self, g: &Game) -> &State<Vec<Achievement>> {
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
-        let (key, steam_id, emu) = (g.key.clone(), g.steam_appid, g.emu.clone());
+        let (key, steam_id) = (g.key.clone(), g.steam_appid);
+        // An own program with a known id: its save may have shown up
+        // since the scan, and with none yet the list is shown unearned.
+        let own_id = (g.source == crate::game::Source::Own)
+            .then_some(g.store_appid)
+            .flatten();
+        let (emu, prefix) = (g.emu.clone(), g.prefix.clone());
         self.ach.entry(g.key.clone()).or_insert_with(|| {
             std::thread::spawn(move || {
                 let lang = crate::i18n::steam_lang();
+                let emu = emu.or_else(|| emu::save_of(prefix.as_deref()?, own_id?));
                 let list = match (steam_id, emu) {
                     (Some(id), _) => steam::achievements(id, lang).map(|mut l| {
                         // How rare each is, when the store answers.
@@ -118,7 +125,7 @@ impl Store {
                         }
                         l
                     }),
-                    (None, None) => None,
+                    (None, None) => own_id.and_then(|id| web::achievement_list(id, lang)),
                 };
                 let _ = tx.send(Msg::Ach(key, list));
                 ctx.request_repaint();
@@ -131,6 +138,13 @@ impl Store {
     /// may have moved on).
     pub fn forget_achievements(&mut self) {
         self.ach.retain(|_, s| matches!(s, State::Loading));
+    }
+
+    /// Forget one game's achievements (it earned one).
+    pub fn forget_achievements_of(&mut self, key: &str) {
+        if !matches!(self.ach.get(key), Some(State::Loading)) {
+            self.ach.remove(key);
+        }
     }
 
     /// Forget everything (the language changed).

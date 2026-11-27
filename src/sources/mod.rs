@@ -63,7 +63,11 @@ pub fn scan(cfg: &Config) -> Vec<Game> {
     }
     // Games from elsewhere: a Steam emulator's files name the store id
     // and keep the achievements.
-    for g in out.iter_mut().filter(|g| g.steam_appid.is_none()) {
+    // Own programs already looked (with the id the user gave).
+    for g in out
+        .iter_mut()
+        .filter(|g| g.steam_appid.is_none() && g.source != crate::game::Source::Own)
+    {
         let (id, save) = emu::resolve(g.prefix.as_deref(), g.install_dir.as_deref());
         g.store_appid = g.store_appid.or(id);
         g.emu = save;

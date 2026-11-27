@@ -41,6 +41,14 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.0" date="2026-11-28">
+      <description>
+        <ul>
+          <li>Achievements earned in games with a Steam emulator (own programs and other launchers' games) pop up as desktop notifications while playing</li>
+          <li>Own programs: Steam ID found above Binaries/Win64 folders or typed in the settings; the achievements list shows before the first save; the id goes to umu for protonfixes</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-11-28">
       <description>
         <ul>

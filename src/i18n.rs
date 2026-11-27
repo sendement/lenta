@@ -823,6 +823,14 @@ pub fn tr(key: &str) -> &'static str {
             "Вкладки модулей на странице игры — одной вкладкой",
         ),
         "pg_env" => ("Environment", "Переменные окружения"),
+        "pg_steam_id" => ("Steam ID (achievements)", "Steam ID (достижения)"),
+        "pg_steam_auto" => ("found in the game's files", "найден в файлах игры"),
+        "pg_steam_none" => (
+            "not found — enter it to see achievements",
+            "не найден — впишите, чтобы видеть достижения",
+        ),
+        "pg_steam_bad" => ("A Steam ID is a number", "Steam ID — это число"),
+        "ach_got" => ("Achievement unlocked", "Достижение получено"),
         "pg_env_sub" => (
             "NAME=value words: DXVK_HUD=fps, WINEDLLOVERRIDES=…",
             "Через пробел ИМЯ=значение: DXVK_HUD=fps, WINEDLLOVERRIDES=…",

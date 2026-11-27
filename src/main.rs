@@ -1,6 +1,7 @@
 //! lenta: a gamepad-first game launcher.
 
 mod account;
+mod achwatch;
 mod app;
 mod colls;
 mod config;

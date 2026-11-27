@@ -710,6 +710,16 @@ impl App {
             path: prog.prefix.clone(),
             runner: String::new(),
         });
+        let found = self
+            .games
+            .iter()
+            .find(|g| g.key == key)
+            .and_then(|g| g.store_appid);
+        let steam_sub = match (prog.steam_id, found) {
+            (Some(id), _) => id.to_string(),
+            (None, Some(id)) => format!("{} · {id}", tr("pg_steam_auto")),
+            (None, None) => tr("pg_steam_none").to_string(),
+        };
         let rows = vec![
             Row::new(tr("pg_rename"), prog.title.clone()),
             Row::new(tr("pg_exe"), prog.exe.display().to_string()),
@@ -729,6 +739,7 @@ impl App {
                     prog.env.clone()
                 },
             ),
+            Row::new(tr("pg_steam_id"), steam_sub),
             Row::new(
                 format!("{}: {}", tr("pg_prefix"), pfx.name),
                 progs::runner_name(&pfx.runner),
@@ -777,7 +788,23 @@ impl App {
                 3 => app.type_text(tr("pg_env").to_string(), prog.env.clone(), move |app, t| {
                     set(app, Box::new(move |x| x.env = t));
                 }),
-                4 => app.prefix_actions(pfx),
+                4 => app.type_text(
+                    tr("pg_steam_id").to_string(),
+                    prog.steam_id.map(|i| i.to_string()).unwrap_or_default(),
+                    move |app, t| {
+                        let t = t.trim().to_string();
+                        if t.is_empty() {
+                            set(app, Box::new(|x| x.steam_id = None));
+                        } else if let Ok(n) = t.parse::<u32>()
+                            && n > 0
+                        {
+                            set(app, Box::new(move |x| x.steam_id = Some(n)));
+                        } else {
+                            app.toast(tr("pg_steam_bad"));
+                        }
+                    },
+                ),
+                5 => app.prefix_actions(pfx),
                 _ => app.pick_prefix(pfx.name.clone(), move |app, p| {
                     set(app, Box::new(move |x| x.prefix = p.path));
                 }),
