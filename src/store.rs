@@ -34,6 +34,7 @@ pub enum State<T> {
 enum Msg {
     Details(u32, Option<Details>),
     Ach(String, Option<Vec<Achievement>>),
+    Tally(String, crate::trophy::Tally),
 }
 
 pub struct Store {
@@ -43,6 +44,79 @@ pub struct Store {
     details: HashMap<u32, State<Details>>,
     /// By game key: the same store id may be two games with two saves.
     ach: HashMap<String, State<Vec<Achievement>>>,
+    /// Each game's grade as last counted, kept on disk.
+    trophies: HashMap<String, crate::trophy::Tally>,
+    /// Being counted on the trophies thread.
+    counting: std::collections::HashSet<String>,
+}
+
+/// What a game's achievements are read from.
+#[derive(Clone)]
+struct Want {
+    steam_id: Option<u32>,
+    /// An own program with a known id: its save may have shown up since
+    /// the scan, and with none yet the list is shown unearned.
+    own_id: Option<u32>,
+    emu: Option<emu::Save>,
+    prefix: Option<std::path::PathBuf>,
+}
+
+impl Want {
+    fn of(g: &Game) -> Want {
+        Want {
+            steam_id: g.steam_appid,
+            own_id: (g.source == crate::game::Source::Own)
+                .then_some(g.store_appid)
+                .flatten(),
+            emu: g.emu.clone(),
+            prefix: g.prefix.clone(),
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.steam_id.is_some() || self.own_id.is_some() || self.emu.is_some()
+    }
+
+    /// The list, with how rare each one is when `rarity` (Steam's own
+    /// games ask the store for it).
+    fn load(self, rarity: bool) -> Option<Vec<Achievement>> {
+        let lang = crate::i18n::steam_lang();
+        let own_id = self.own_id;
+        let emu = self
+            .emu
+            .or_else(|| emu::save_of(self.prefix.as_deref()?, own_id?));
+        match (self.steam_id, emu) {
+            (Some(id), _) => steam::achievements(id, lang).map(|mut l| {
+                if !rarity {
+                    return l;
+                }
+                // How rare each is, when the store answers.
+                if let Some(all) = web::achievement_list(id, lang) {
+                    let pct: HashMap<&str, f32> = all
+                        .iter()
+                        .filter_map(|a| Some((a.id.as_str(), a.percent?)))
+                        .collect();
+                    for a in &mut l {
+                        a.percent = pct.get(a.id.as_str()).copied();
+                    }
+                }
+                l
+            }),
+            (None, Some(save)) => web::achievement_list(save.appid, lang).map(|mut l| {
+                let got = emu::unlocked(&save.file);
+                let lower: HashMap<String, u64> =
+                    got.iter().map(|(k, v)| (k.to_lowercase(), *v)).collect();
+                for a in &mut l {
+                    a.unlocked = got
+                        .get(&a.id)
+                        .or_else(|| lower.get(&a.id.to_lowercase()))
+                        .copied();
+                }
+                l
+            }),
+            (None, None) => own_id.and_then(|id| web::achievement_list(id, lang)),
+        }
+    }
 }
 
 const FRESH: Duration = Duration::from_secs(7 * 86400);
@@ -56,10 +130,13 @@ impl Store {
             rx,
             details: HashMap::new(),
             ach: HashMap::new(),
+            trophies: crate::trophy::load(),
+            counting: Default::default(),
         }
     }
 
     pub fn pump(&mut self) {
+        let mut changed = false;
         while let Ok(m) = self.rx.try_recv() {
             match m {
                 Msg::Details(id, d) => {
@@ -67,9 +144,26 @@ impl Store {
                         .insert(id, d.map_or(State::Failed, State::Ready));
                 }
                 Msg::Ach(id, a) => {
+                    if let Some(l) = &a {
+                        let t = crate::trophy::Tally::of(l);
+                        if self.trophies.get(&id) != Some(&t) {
+                            self.trophies.insert(id.clone(), t);
+                            changed = true;
+                        }
+                    }
                     self.ach.insert(id, a.map_or(State::Failed, State::Ready));
                 }
+                Msg::Tally(id, t) => {
+                    self.counting.remove(&id);
+                    if self.trophies.get(&id) != Some(&t) {
+                        self.trophies.insert(id, t);
+                        changed = true;
+                    }
+                }
             }
+        }
+        if changed {
+            crate::trophy::save(&self.trophies);
         }
     }
 
@@ -88,50 +182,60 @@ impl Store {
     /// emulator's save matched to the store's list for one from elsewhere.
     pub fn achievements(&mut self, g: &Game) -> &State<Vec<Achievement>> {
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
-        let (key, steam_id) = (g.key.clone(), g.steam_appid);
-        // An own program with a known id: its save may have shown up
-        // since the scan, and with none yet the list is shown unearned.
-        let own_id = (g.source == crate::game::Source::Own)
-            .then_some(g.store_appid)
-            .flatten();
-        let (emu, prefix) = (g.emu.clone(), g.prefix.clone());
+        let (key, want) = (g.key.clone(), Want::of(g));
         self.ach.entry(g.key.clone()).or_insert_with(|| {
             std::thread::spawn(move || {
-                let lang = crate::i18n::steam_lang();
-                let emu = emu.or_else(|| emu::save_of(prefix.as_deref()?, own_id?));
-                let list = match (steam_id, emu) {
-                    (Some(id), _) => steam::achievements(id, lang).map(|mut l| {
-                        // How rare each is, when the store answers.
-                        if let Some(all) = web::achievement_list(id, lang) {
-                            let pct: HashMap<&str, f32> = all
-                                .iter()
-                                .filter_map(|a| Some((a.id.as_str(), a.percent?)))
-                                .collect();
-                            for a in &mut l {
-                                a.percent = pct.get(a.id.as_str()).copied();
-                            }
-                        }
-                        l
-                    }),
-                    (None, Some(save)) => web::achievement_list(save.appid, lang).map(|mut l| {
-                        let got = emu::unlocked(&save.file);
-                        let lower: HashMap<String, u64> =
-                            got.iter().map(|(k, v)| (k.to_lowercase(), *v)).collect();
-                        for a in &mut l {
-                            a.unlocked = got
-                                .get(&a.id)
-                                .or_else(|| lower.get(&a.id.to_lowercase()))
-                                .copied();
-                        }
-                        l
-                    }),
-                    (None, None) => own_id.and_then(|id| web::achievement_list(id, lang)),
-                };
-                let _ = tx.send(Msg::Ach(key, list));
+                let _ = tx.send(Msg::Ach(key, want.load(true)));
                 ctx.request_repaint();
             });
             State::Loading
         })
+    }
+
+    pub fn trophies(&self) -> &HashMap<String, crate::trophy::Tally> {
+        &self.trophies
+    }
+
+    /// Count this game again (it earned something while playing).
+    pub fn recount(&mut self, g: &Game) {
+        self.trophies.remove(&g.key);
+        self.count_trophies(std::slice::from_ref(g));
+    }
+
+    /// A game's grade as last counted (cards show it).
+    pub fn tally(&self, key: &str) -> Option<crate::trophy::Tally> {
+        self.trophies.get(key).copied().filter(|t| t.total > 0)
+    }
+
+    /// Count the installed games not counted yet, one after another on a
+    /// thread of its own (Steam's are read from its files, without the
+    /// rarity the store would tell).
+    pub fn count_trophies(&mut self, games: &[Game]) {
+        let todo: Vec<(String, Want)> = games
+            .iter()
+            .filter(|g| g.installed && !self.trophies.contains_key(&g.key))
+            .filter(|g| !self.counting.contains(&g.key))
+            .map(|g| (g.key.clone(), Want::of(g)))
+            .filter(|(_, w)| w.any())
+            .collect();
+        if todo.is_empty() {
+            return;
+        }
+        self.counting.extend(todo.iter().map(|(k, _)| k.clone()));
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let _ = std::thread::Builder::new()
+            .name("lenta-trophies".into())
+            .spawn(move || {
+                for (key, want) in todo {
+                    let list = want.load(false);
+                    let t = list
+                        .as_deref()
+                        .map(crate::trophy::Tally::of)
+                        .unwrap_or_default();
+                    let _ = tx.send(Msg::Tally(key, t));
+                }
+                ctx.request_repaint();
+            });
     }
 
     /// Forget what was loaded (after a rescan: play time and achievements

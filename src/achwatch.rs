@@ -100,7 +100,7 @@ pub fn spawn(
                     // Changed while not running (another tool, a copied
                     // save): taken in quietly.
                     if on.contains(&it.key) {
-                        tell(it, &fresh);
+                        tell(it, &fresh, &s.got);
                     }
                     earned_in(it.key.clone());
                 }
@@ -109,38 +109,87 @@ pub fn spawn(
         });
 }
 
-/// A desktop notification per achievement, with its name, description and
-/// icon from the store's list when it answers.
-fn tell(it: &Item, ids: &[String]) {
+/// One banner (or desktop notification) per achievement, with its name,
+/// description and icon from the store's list, and the game's grade.
+fn tell(it: &Item, ids: &[String], all_now: &HashSet<String>) {
     if std::env::var_os("LENTA_DRY_RUN").is_some() {
+        return;
+    }
+    let cfg = crate::config::Config::load();
+    if !cfg.ach_notify {
         return;
     }
     let lang = crate::i18n::steam_lang();
     let list = crate::sources::web::achievement_list(it.appid, lang).unwrap_or_default();
+    let known = |id: &str| list.iter().any(|a| a.id.eq_ignore_ascii_case(id));
+    let total = list.len() as u32;
+    let got_now = all_now.iter().filter(|i| known(i)).count() as u32;
+    let fresh_known = ids.iter().filter(|i| known(i)).count() as u32;
+    let mut got = got_now.saturating_sub(fresh_known);
     for id in ids.iter().take(5) {
         let a = list.iter().find(|a| a.id.eq_ignore_ascii_case(id));
+        let before = crate::trophy::Tally { got, total }.tier();
+        if a.is_some() {
+            got += 1;
+        }
+        let after = crate::trophy::Tally { got, total }.tier();
         let name = a.map_or(id.clone(), |a| a.name.clone());
         let desc = a.map(|a| a.desc.clone()).unwrap_or_default();
         let icon = a.and_then(|a| a.icon.as_ref()).and_then(icon_file);
-        let mut c = std::process::Command::new("notify-send");
-        c.args(["-a", "Lenta", "-u", "normal"]);
-        match &icon {
-            Some(p) => c.arg(format!("--icon={}", p.display())),
-            None => c.arg("--icon=io.github.sendement.Lenta"),
+        let card = crate::banner::Card {
+            game: it.title.clone(),
+            name: name.clone(),
+            desc: desc.clone(),
+            icon: icon.as_ref().map(|p| p.display().to_string()),
+            got,
+            total,
+            new_tier: after
+                .filter(|t| Some(*t) != before)
+                .map(|t| t.key().to_string()),
         };
-        let head = format!("{} · {}", crate::i18n::tr("ach_got"), it.title);
-        let body = if desc.is_empty() {
-            name
-        } else {
-            format!("{name}\n{desc}")
-        };
-        c.arg(head).arg(body);
-        let _ = crate::sandbox::host(c)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        if cfg.ach_banner && show_banner(&card) {
+            continue;
+        }
+        notify(it, &name, &desc, icon.as_deref());
     }
+}
+
+/// Lenta's banner in a process of its own; false when it couldn't show.
+fn show_banner(card: &crate::banner::Card) -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Ok(json) = serde_json::to_string(card) else {
+        return false;
+    };
+    std::process::Command::new(exe)
+        .arg("--banner")
+        .arg(json)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+fn notify(it: &Item, name: &str, desc: &str, icon: Option<&std::path::Path>) {
+    let mut c = std::process::Command::new("notify-send");
+    c.args(["-a", "Lenta", "-u", "normal"]);
+    match icon {
+        Some(p) => c.arg(format!("--icon={}", p.display())),
+        None => c.arg("--icon=io.github.sendement.Lenta"),
+    };
+    let head = format!("{} · {}", crate::i18n::tr("ach_got"), it.title);
+    let body = if desc.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}\n{desc}")
+    };
+    c.arg(head).arg(body);
+    let _ = crate::sandbox::host(c)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 /// The icon as a file the notification daemon can open.

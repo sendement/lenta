@@ -508,8 +508,12 @@ fn api(key: &str, path: &str, cache: &str) -> Option<Value> {
     }
 }
 
-/// SteamGridDB's id for a game: by its Steam id, else by an exact title.
-pub fn game_id(key: &str, steam: Option<u32>, title: &str) -> Option<u64> {
+/// SteamGridDB's entries for a game: the one its Steam id names, and the
+/// one with exactly its title (a game is sometimes there twice, the art
+/// on the one without the Steam link). A title several entries share
+/// adds none to a Steam-linked one, and only the first otherwise.
+pub fn game_ids(key: &str, steam: Option<u32>, title: &str) -> Vec<u64> {
+    let mut out = Vec::new();
     if let Some(app) = steam
         && let Some(v) = api(
             key,
@@ -518,60 +522,103 @@ pub fn game_id(key: &str, steam: Option<u32>, title: &str) -> Option<u64> {
         )
         && let Some(id) = v.pointer("/data/id").and_then(Value::as_u64)
     {
-        return Some(id);
+        out.push(id);
     }
     let want = crate::sources::web::words(title);
     if want.is_empty() {
-        return None;
+        return out;
     }
     let term = want.join(" ");
-    let v = api(
+    let Some(v) = api(
         key,
         &format!("search/autocomplete/{}", enc(&term)),
         &format!("search-{:016x}.json", crate::net::hash(&term)),
-    )?;
-    v.get("data")?
-        .as_array()?
-        .iter()
-        .find(|g| {
+    ) else {
+        return out;
+    };
+    let same: Vec<u64> = v
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|g| {
             g.get("name")
                 .and_then(Value::as_str)
                 .is_some_and(|n| crate::sources::web::words(n) == want)
         })
-        .and_then(|g| g.get("id")?.as_u64())
+        .filter_map(|g| g.get("id")?.as_u64())
+        .filter(|id| !out.contains(id))
+        .collect();
+    match (out.is_empty(), same.as_slice()) {
+        (true, [first, ..]) => out.push(*first),
+        (false, [only]) => out.push(*only),
+        _ => {}
+    }
+    out
 }
 
-/// The pictures of one kind for a game, best first; none of the NSFW,
-/// joke or flashing ones.
+/// How many pages of 50 are read at most (500 pictures).
+const PAGES: u32 = 10;
+
+/// The pictures of one kind for one entry, best first; none of the NSFW,
+/// joke or flashing ones. Every page of them.
 pub fn assets(key: &str, id: u64, kind: ArtKind) -> Vec<Asset> {
     let path = kind.path().replace("{id}", &id.to_string());
     let sep = if path.contains('?') { '&' } else { '?' };
-    let path = format!("{path}{sep}nsfw=false&humor=false");
-    let Some(v) = api(key, &path, &format!("{}-{id}.json", kind.key())) else {
-        return Vec::new();
-    };
-    v.get("data")
-        .and_then(Value::as_array)
+    let mut out = Vec::new();
+    for page in 0..PAGES {
+        let path = format!("{path}{sep}nsfw=false&humor=false&page={page}");
+        let cache = if page == 0 {
+            format!("{}-{id}.json", kind.key())
+        } else {
+            format!("{}-{id}-p{page}.json", kind.key())
+        };
+        let Some(v) = api(key, &path, &cache) else {
+            break;
+        };
+        let data = v.get("data").and_then(Value::as_array);
+        let n = data.map_or(0, |d| d.len());
+        out.extend(
+            data.into_iter()
+                .flatten()
+                .filter(|a| {
+                    !["nsfw", "humor", "epilepsy"]
+                        .iter()
+                        .any(|f| a.get(*f).and_then(Value::as_bool) == Some(true))
+                })
+                .filter_map(|a| {
+                    Some(Asset {
+                        url: a.get("url")?.as_str()?.to_string(),
+                        thumb: a.get("thumb")?.as_str()?.to_string(),
+                        width: a.get("width").and_then(Value::as_u64).unwrap_or(0) as u32,
+                        height: a.get("height").and_then(Value::as_u64).unwrap_or(0) as u32,
+                        style: a
+                            .get("style")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                }),
+        );
+        let total = v.get("total").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let limit = v.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
+        if n == 0 || n < limit || (page as usize + 1) * limit >= total {
+            break;
+        }
+    }
+    out
+}
+
+/// The pictures of one kind from all of a game's entries: the fullest
+/// entry first, each picture once.
+pub fn assets_of(key: &str, ids: &[u64], kind: ArtKind) -> Vec<Asset> {
+    let mut lists: Vec<Vec<Asset>> = ids.iter().map(|&id| assets(key, id, kind)).collect();
+    lists.sort_by_key(|l| std::cmp::Reverse(l.len()));
+    let mut seen = std::collections::HashSet::new();
+    lists
         .into_iter()
         .flatten()
-        .filter(|a| {
-            !["nsfw", "humor", "epilepsy"]
-                .iter()
-                .any(|f| a.get(*f).and_then(Value::as_bool) == Some(true))
-        })
-        .filter_map(|a| {
-            Some(Asset {
-                url: a.get("url")?.as_str()?.to_string(),
-                thumb: a.get("thumb")?.as_str()?.to_string(),
-                width: a.get("width").and_then(Value::as_u64).unwrap_or(0) as u32,
-                height: a.get("height").and_then(Value::as_u64).unwrap_or(0) as u32,
-                style: a
-                    .get("style")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-            })
-        })
+        .filter(|a| seen.insert(a.url.clone()))
         .collect()
 }
 
@@ -611,4 +658,24 @@ pub fn set_pick(game: &str, kind: ArtKind, url: Option<&str>) -> Result<(), Stri
     )
     .map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
+}
+
+/// What one game finds with the user's key (run by hand):
+/// `cargo test sgdb::live -- --ignored --nocapture`.
+#[cfg(test)]
+mod live {
+    #[test]
+    #[ignore]
+    fn phantom_blade_zero() {
+        let Some(key) = super::key() else { return };
+        let ids = super::game_ids(&key, Some(4115450), "Phantom Blade Zero");
+        println!("ids {ids:?}");
+        for k in super::ArtKind::ALL {
+            println!("{} {}", k.key(), super::assets_of(&key, &ids, k).len());
+        }
+        // A title shared by several entries adds none to the Steam one.
+        let ids = super::game_ids(&key, None, "Phantom");
+        println!("Phantom {ids:?}");
+        assert!(ids.len() <= 1);
+    }
 }

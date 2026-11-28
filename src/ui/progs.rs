@@ -811,4 +811,56 @@ impl App {
             }
         });
     }
+
+    /// The id and GSE folders of a game whose emulator drops achievements.
+    fn gse_need(&self, key: &str) -> Option<(u32, Vec<crate::gse::Missing>)> {
+        let g = self.game_by_key(key)?;
+        if !g.installed || g.steam_appid.is_some() {
+            return None;
+        }
+        let id = g.store_appid.or(g.emu.as_ref().map(|e| e.appid))?;
+        let m = crate::gse::missing_for(g.install_dir.as_deref());
+        (!m.is_empty()).then_some((id, m))
+    }
+
+    pub fn can_gse_ach(&self, key: &str) -> bool {
+        if let Some((t, v)) = self.gse_seen.borrow().get(key)
+            && t.elapsed() < std::time::Duration::from_secs(5)
+        {
+            return *v;
+        }
+        let v = self.gse_need(key).is_some();
+        self.gse_seen
+            .borrow_mut()
+            .insert(key.to_string(), (std::time::Instant::now(), v));
+        v
+    }
+
+    /// Write GSE's achievements list (it keeps none without it).
+    pub fn gse_ach(&mut self, key: &str) {
+        if self.busy() {
+            return;
+        }
+        let Some((id, dirs)) = self.gse_need(key) else {
+            return;
+        };
+        let k = key.to_string();
+        self.start_job(
+            Some(k.clone()),
+            tr("gse_working").to_string(),
+            move |_, _| {
+                let mut n = 0;
+                for m in &dirs {
+                    n = crate::gse::write(m, id)?;
+                }
+                Ok(format!("{} {n}", tr("gse_done")))
+            },
+            move |app, r| {
+                app.gse_seen.borrow_mut().remove(&k);
+                if r.is_ok() {
+                    app.store.forget_achievements_of(&k);
+                }
+            },
+        );
+    }
 }

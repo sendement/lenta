@@ -1526,3 +1526,131 @@ fn mods_module() {
     snap(&mut h, &dir, "mods-group-next");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// Medals and cups: on the ribbon, in the Library, on the Achievements tab
+/// of a game that has a grade.
+#[test]
+#[ignore]
+fn trophies() {
+    use crate::app::Page;
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let mut h = harness([1600.0, 900.0]);
+    for _ in 0..200 {
+        h.step();
+        if !h.state().scanning {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    // Counted on a thread: wait for the grades.
+    for _ in 0..300 {
+        h.step();
+        let n = h
+            .state()
+            .store
+            .trophies()
+            .values()
+            .filter(|t| t.tier().is_some())
+            .count();
+        if n >= 3 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let graded: Vec<(String, crate::trophy::Tally)> = h
+        .state()
+        .store
+        .trophies()
+        .iter()
+        .filter(|(_, t)| t.tier().is_some())
+        .map(|(k, t)| (k.clone(), *t))
+        .collect();
+    println!("graded: {graded:?}");
+    // The ribbon on a graded game.
+    if let Some((k, _)) = graded.first()
+        && let Some(i) = h.state().games.iter().position(|g| &g.key == k)
+    {
+        h.state_mut().home.sel = i;
+        h.state_mut().home.pos = i as f32;
+    }
+    snap(&mut h, &dir, "trophies-home");
+    h.state_mut().go(Page::Library);
+    settle(&mut h, 5);
+    snap(&mut h, &dir, "trophies-library");
+    let best = graded
+        .iter()
+        .max_by(|a, b| a.1.share().total_cmp(&b.1.share()))
+        .map(|(k, _)| k.clone());
+    if let Some(k) = best {
+        h.state_mut().open_game(k);
+        settle(&mut h, 5);
+        h.state_mut().handle(Action::RightTrigger);
+        snap(&mut h, &dir, "trophies-game");
+    }
+}
+
+/// The achievement banner as drawn on its own surface.
+#[test]
+#[ignore]
+fn banner() {
+    let dir = std::env::var_os("LENTA_SHOT_DIR").map(PathBuf::from);
+    let icon = crate::net::cache_dir().join("achievements/icons");
+    let icon = std::fs::read_dir(&icon)
+        .ok()
+        .and_then(|mut r| r.next())
+        .and_then(|e| e.ok())
+        .map(|e| e.path());
+    for (name, got, new_tier) in [
+        ("banner", 23u32, None),
+        ("banner-tier", 33, Some("tr_silver")),
+    ] {
+        let card = crate::banner::Card {
+            game: "Phantom Blade Zero".into(),
+            name: "Путь сердца".into(),
+            desc: "Скройтесь от преследователей на Главной дороге".into(),
+            icon: None,
+            got,
+            total: 66,
+            new_tier: new_tier.map(str::to_string),
+        };
+        let img = icon.as_ref().and_then(|p| image::open(p).ok()).map(|i| {
+            let i = i.to_rgba8();
+            egui::ColorImage::from_rgba_unmultiplied(
+                [i.width() as usize, i.height() as usize],
+                i.as_raw(),
+            )
+        });
+        let mut tex: Option<egui::TextureHandle> = None;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([520.0, 112.0])
+            .wgpu()
+            .build_ui(move |ui| {
+                crate::fonts::install(ui.ctx());
+                ui.painter()
+                    .rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(60, 80, 70));
+                if tex.is_none()
+                    && let Some(i) = img.clone()
+                {
+                    tex = Some(ui.ctx().load_texture("i", i, Default::default()));
+                }
+                crate::banner::draw(
+                    ui,
+                    &card,
+                    tex.as_ref().map(|t| t.id()),
+                    (
+                        egui::Color32::from_rgb(80, 160, 255),
+                        egui::Color32::from_rgb(170, 110, 255),
+                    ),
+                    1.0,
+                );
+            });
+        for _ in 0..5 {
+            h.step();
+        }
+        let shot = h.render().expect("render");
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).unwrap();
+            shot.save(d.join(format!("{name}.png"))).unwrap();
+        }
+    }
+}

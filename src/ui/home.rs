@@ -284,6 +284,7 @@ impl App {
         let look = Look {
             accent: self.accent,
             pulse,
+            trophies: self.cfg.trophy_badges.then(|| self.store.trophies()),
         };
         let games: Vec<&Game> = self.games.iter().collect();
         let out = ribbon::draw(

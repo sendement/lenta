@@ -58,9 +58,27 @@ fn agent() -> ureq::Agent {
 }
 
 /// A JSON answer of the API.
+static RU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The language Nexus' errors are told in (each question says).
+pub fn set_ru(ru: bool) {
+    RU.store(ru, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn say(en: &str, ru: &str) -> String {
+    if RU.load(std::sync::atomic::Ordering::Relaxed) {
+        ru.to_string()
+    } else {
+        en.to_string()
+    }
+}
+
 pub fn get(key: &str, path: &str) -> Result<Value, String> {
     if key.is_empty() {
-        return Err("no API key".into());
+        return Err(say(
+            "No Nexus API key yet: put it in on the Mods module's page",
+            "Ключа API Nexus ещё нет: впишите его на странице модуля «Моды»",
+        ));
     }
     let mut r = agent()
         .get(&format!("{API}{path}"))
@@ -70,9 +88,20 @@ pub fn get(key: &str, path: &str) -> Result<Value, String> {
         .header("Application-Version", env!("CARGO_PKG_VERSION"))
         .call()
         .map_err(|e| match e {
-            ureq::Error::StatusCode(401) => "the API key isn't accepted".to_string(),
-            ureq::Error::StatusCode(403) => "Nexus refused (Premium only?)".to_string(),
-            ureq::Error::StatusCode(429) => "too many requests to Nexus: later".to_string(),
+            ureq::Error::StatusCode(401) => say(
+                "Nexus doesn't accept this API key. Copy the whole Personal API Key \
+                 again: nexusmods.com → avatar → Settings → API Keys (bottom of the page)",
+                "Nexus не принял ключ. Скопируйте Personal API Key целиком заново: \
+                 nexusmods.com → аватар → Settings → API Keys (внизу страницы)",
+            ),
+            ureq::Error::StatusCode(403) => say(
+                "Nexus refused: this needs Premium",
+                "Nexus отказал: это доступно только с Premium",
+            ),
+            ureq::Error::StatusCode(429) => say(
+                "Too many requests to Nexus: try again in an hour",
+                "Слишком много запросов к Nexus: попробуйте через час",
+            ),
             e => e.to_string(),
         })?;
     let text = r.body_mut().read_to_string().map_err(|e| e.to_string())?;

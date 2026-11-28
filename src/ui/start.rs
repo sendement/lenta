@@ -413,6 +413,9 @@ impl App {
             .unwrap_or_default();
         for k in earned {
             self.store.forget_achievements_of(&k);
+            if let Some(g) = self.games.iter().find(|g| g.key == k).cloned() {
+                self.store.recount(&g);
+            }
         }
         let now: std::collections::HashSet<String> = self
             .running

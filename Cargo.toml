@@ -1,6 +1,6 @@
 [package]
 name = "lenta"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 description = "Gamepad-first game launcher: Steam, Heroic, Lutris and Hydra games on a ribbon of cards"
@@ -39,6 +39,14 @@ rodio = { version = "0.23.0", default-features = false, features = ["playback", 
 sha2 = "0.10"
 serde_yaml = "0.9"
 rusty-leveldb = "3"
+# The achievement banner: a layer-shell surface drawn with egui on EGL.
+smithay-client-toolkit = { version = "0.20", default-features = false, features = ["calloop"] }
+wayland-client = "0.31"
+wayland-egl = "0.32"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+khronos-egl = { version = "6", features = ["static"] }
+egui_glow = "0.36"
+glow = "0.17"
 
 [profile.release]
 lto = "thin"

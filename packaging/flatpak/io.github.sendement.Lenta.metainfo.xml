@@ -41,6 +41,18 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.0" date="2026-11-28">
+      <description>
+        <ul>
+          <li>Grades by achievements earned: bronze, silver, gold medals and a platinum cup, on the cards and the Achievements tab</li>
+          <li>Lenta's own achievement banner over the game (wlr-layer-shell; a desktop notification elsewhere, and in the Flatpak)</li>
+          <li>"Turn on achievement saving": writes the achievements list Goldberg/GSE needs to keep them</li>
+          <li>SteamGridDB: every page, and art from a game's second entry with the same title</li>
+          <li>Covers of games from elsewhere show at once at start and no longer blink after playing</li>
+          <li>Achievement names some games give as hex bytes are shown as text; Nexus errors explained</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-11-28">
       <description>
         <ul>

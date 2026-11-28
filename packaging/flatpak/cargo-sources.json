@@ -6255,6 +6255,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/wayland-egl/wayland-egl-0.32.11.crate",
+        "sha256": "9b97bdb7c49e5bd9b7562f38ff84f0dad47079fdc9e926f691a787f6dbc05451",
+        "dest": "cargo/vendor/wayland-egl-0.32.11"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"9b97bdb7c49e5bd9b7562f38ff84f0dad47079fdc9e926f691a787f6dbc05451\", \"files\": {}}",
+        "dest": "cargo/vendor/wayland-egl-0.32.11",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/wayland-protocols/wayland-protocols-0.32.13.crate",
         "sha256": "23d0c813de3daa2ed6520af85a3bd49b0e722a3078506899aa9686fea58dc4b6",
         "dest": "cargo/vendor/wayland-protocols-0.32.13"

@@ -208,7 +208,7 @@ fn ini_appid(p: &Path) -> Option<u32> {
 }
 
 /// Folders games keep their exe in below their own (Binaries/Win64…).
-fn is_bin_dir(d: &Path) -> bool {
+pub fn is_bin_dir(d: &Path) -> bool {
     const SUB: [&str; 12] = [
         "bin", "bin32", "bin64", "binaries", "win32", "win64", "x86", "x64", "x86_64", "retail",
         "release", "shipping",

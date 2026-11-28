@@ -1190,6 +1190,11 @@ impl App {
         if !has_art {
             ribbon::title_on(p, &mut self.images, g, pose.bounds(), 1.0);
         }
+        if self.cfg.trophy_badges
+            && let Some(t) = self.store.tally(&g.key).and_then(|t| t.tier())
+        {
+            crate::trophy::badge(p, pose.bounds(), t, light.max(0.6));
+        }
     }
 
     /// A collection: up to three covers fanned out, its name and count.

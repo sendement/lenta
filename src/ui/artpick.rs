@@ -64,10 +64,11 @@ impl App {
         let ctx = self.ctx.clone();
         let (steam, title) = (g.steam_appid.or(g.store_appid), g.title.clone());
         std::thread::spawn(move || {
-            let r = sgdb::game_id(&key, steam, &title).map(|id| {
+            let ids = sgdb::game_ids(&key, steam, &title);
+            let r = (!ids.is_empty()).then(|| {
                 ArtKind::ALL
                     .into_iter()
-                    .map(|k| (k, sgdb::assets(&key, id, k)))
+                    .map(|k| (k, sgdb::assets_of(&key, &ids, k)))
                     .collect()
             });
             let _ = tx.send(r);

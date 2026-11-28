@@ -122,10 +122,12 @@ pub struct Out {
     pub selected: Option<Rect>,
 }
 
-pub struct Look {
+pub struct Look<'a> {
     pub accent: (Color32, Color32),
     /// 0…1, for the glow's breathing.
     pub pulse: f32,
+    /// Games' achievement grades, for the badge on their cards.
+    pub trophies: Option<&'a std::collections::HashMap<String, crate::trophy::Tally>>,
 }
 
 /// Draw the ribbon in `rect`; `pos` is the (animated) index in the middle.
@@ -137,7 +139,7 @@ pub fn draw(
     sel: usize,
     pos: f32,
     images: &mut Images,
-    look: &Look,
+    look: &Look<'_>,
 ) -> Out {
     let mut out = Out::default();
     if games.is_empty() {
@@ -273,6 +275,13 @@ pub fn draw(
         let bounds = pose.bounds();
         if !has_art {
             title_on(&painter, images, g, bounds, alpha * light);
+        }
+        if let Some(t) = look
+            .trophies
+            .and_then(|m| m.get(&g.key))
+            .and_then(|t| t.tier())
+        {
+            crate::trophy::badge(&painter, bounds, t, alpha * light);
         }
         if cfg.titles {
             let selected = i == sel;

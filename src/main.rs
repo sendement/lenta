@@ -3,12 +3,14 @@
 mod account;
 mod achwatch;
 mod app;
+mod banner;
 mod colls;
 mod config;
 mod dllmods;
 mod downgrade;
 mod fonts;
 mod game;
+mod gse;
 mod i18n;
 mod images;
 mod input;
@@ -28,6 +30,7 @@ mod sgdb;
 mod sources;
 mod steamlib;
 mod store;
+mod trophy;
 mod ui;
 mod uninstall;
 mod vdf;
@@ -46,6 +49,16 @@ fn main() -> eframe::Result {
             println!("{:#?}", all.get(&id));
         }
         return Ok(());
+    }
+    // An achievement banner over the game (the watcher starts it):
+    // --banner JSON.
+    if std::env::args().nth(1).as_deref() == Some("--banner") {
+        i18n::set(config::Config::load().lang);
+        let card = std::env::args()
+            .nth(2)
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+        std::process::exit(banner::run(card));
     }
     // What it sees, without a window (for bug reports, and checking the
     // Flatpak build): --diagnose.

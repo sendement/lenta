@@ -1011,8 +1011,41 @@ impl App {
         let got = list.iter().filter(|a| a.unlocked.is_some()).count();
         let mut y = body.top() - scroll;
         let pct = got as f32 / list.len().max(1) as f32;
+        // The grade: its mark at the left, its name and the next one.
+        let tally = crate::trophy::Tally::of(&list);
+        let mark_c = pos2(body.left() + 26.0, y + 22.0);
+        match tally.tier() {
+            Some(t) => crate::trophy::mark(&p, mark_c, 50.0, t, 1.0),
+            None => crate::trophy::mark(&p, mark_c, 50.0, crate::trophy::Tier::Bronze, 0.25),
+        }
+        let left = body.left() + 62.0;
+        let grade = match (tally.tier(), tally.to_next()) {
+            (Some(t), Some((n, more))) => format!(
+                "{} · {} {} {} {more}",
+                tr(t.key()),
+                tr("tr_next"),
+                tr(n.key()).to_lowercase(),
+                tr("tr_more")
+            ),
+            (Some(t), None) => tr(t.key()).to_string(),
+            (None, Some((n, more))) => format!(
+                "{} {} {} {more}",
+                tr("tr_next"),
+                tr(n.key()).to_lowercase(),
+                tr("tr_more")
+            ),
+            (None, None) => String::new(),
+        };
+        let gw = body.width().min(700.0) + body.left() - left;
         p.text(
-            pos2(body.left(), y),
+            pos2(left + gw, y + 4.0),
+            Align2::RIGHT_TOP,
+            grade,
+            FontId::proportional(16.0),
+            Color32::from_gray(190),
+        );
+        p.text(
+            pos2(left, y),
             Align2::LEFT_TOP,
             format!(
                 "{}: {got} / {}  ({:.0}%)",
@@ -1025,15 +1058,25 @@ impl App {
         );
         widgets::bar(
             &p,
-            Rect::from_min_size(
-                pos2(body.left(), y + 34.0),
-                vec2(body.width().min(700.0), 8.0),
-            ),
+            Rect::from_min_size(pos2(left, y + 34.0), vec2(gw, 8.0)),
             pct,
             c1,
             c2,
         );
         y += 64.0;
+        if self.can_gse_ach(&g.key) {
+            let mut job = egui::text::LayoutJob::simple(
+                tr("gse_hint").to_string(),
+                FontId::proportional(16.0),
+                Color32::from_rgb(240, 200, 120),
+                body.width().min(900.0),
+            );
+            job.wrap.max_rows = 2;
+            let hg = p.fonts_mut(|f| f.layout_job(job));
+            let h = hg.size().y;
+            p.galley(pos2(body.left(), y - 18.0), hg, Color32::WHITE);
+            y += h + 6.0;
+        }
         let mut sorted = list;
         sorted.sort_by(|a, b| match (a.unlocked, b.unlocked) {
             (Some(x), Some(y)) => y.cmp(&x),

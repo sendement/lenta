@@ -244,11 +244,12 @@ fn fill_from_sgdb(g: &mut Game, key: &str, logos: bool) {
     if missing.is_empty() {
         return;
     }
-    let Some(id) = crate::sgdb::game_id(key, g.steam_appid.or(g.store_appid), &g.title) else {
+    let ids = crate::sgdb::game_ids(key, g.steam_appid.or(g.store_appid), &g.title);
+    if ids.is_empty() {
         return;
-    };
+    }
     for kind in missing {
-        let Some(best) = crate::sgdb::assets(key, id, kind).into_iter().next() else {
+        let Some(best) = crate::sgdb::assets_of(key, &ids, kind).into_iter().next() else {
             continue;
         };
         let art = Some(Art::Url(best.url));
@@ -381,8 +382,8 @@ fn parse_achievements(appid: u32, body: &[u8]) -> Option<Vec<Achievement>> {
         .iter()
         .map(|a| Achievement {
             id: s(a, "internal_name"),
-            name: s(a, "localized_name"),
-            desc: s(a, "localized_desc"),
+            name: crate::sources::steam::unhex(s(a, "localized_name")),
+            desc: crate::sources::steam::unhex(s(a, "localized_desc")),
             icon: icon(a, "icon"),
             icon_gray: icon(a, "icon_gray"),
             hidden: a.get("hidden").and_then(Value::as_bool).unwrap_or(false),

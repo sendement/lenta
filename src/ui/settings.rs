@@ -48,6 +48,9 @@ pub enum S {
     Prefixes,
     FilePortal,
     GroupModTabs,
+    TrophyBadges,
+    AchNotify,
+    AchBanner,
     Rescan,
     Account,
     Uninstalled,
@@ -117,6 +120,10 @@ const ROWS: &[Row] = &[
     Row::Item(S::FilePortal),
     Row::Item(S::GroupModTabs),
     Row::Item(S::Rescan),
+    Row::Head("s_ach"),
+    Row::Item(S::TrophyBadges),
+    Row::Item(S::AchNotify),
+    Row::Item(S::AchBanner),
     Row::Head("s_account"),
     Row::Item(S::Account),
     Row::Item(S::Uninstalled),
@@ -165,6 +172,9 @@ fn kind(s: S) -> Kind {
         | S::Own
         | S::FilePortal
         | S::GroupModTabs
+        | S::TrophyBadges
+        | S::AchNotify
+        | S::AchBanner
         | S::Uninstalled
         | S::ThemeMusic
         | S::ThemeMusicRibbon
@@ -213,6 +223,9 @@ fn label(s: S) -> &'static str {
         S::Prefixes => "pg_prefixes",
         S::FilePortal => "fp_portal",
         S::GroupModTabs => "mod_group_set",
+        S::TrophyBadges => "ach_badges",
+        S::AchNotify => "ach_notify",
+        S::AchBanner => "ach_banner",
         S::Rescan => "rescan",
         S::Account => "account",
         S::Uninstalled => "show_uninstalled",
@@ -260,6 +273,9 @@ fn toggle_ref(c: &mut Config, s: S) -> Option<&mut bool> {
         S::Own => &mut c.own,
         S::FilePortal => &mut c.file_portal,
         S::GroupModTabs => &mut c.group_mod_tabs,
+        S::TrophyBadges => &mut c.trophy_badges,
+        S::AchNotify => &mut c.ach_notify,
+        S::AchBanner => &mut c.ach_banner,
         S::Uninstalled => &mut c.show_uninstalled,
         S::ThemeMusic => &mut c.theme_music,
         S::ThemeMusicRibbon => &mut c.theme_music_ribbon,
@@ -1045,6 +1061,7 @@ impl App {
             &Look {
                 accent: self.accent,
                 pulse,
+                trophies: None,
             },
         );
     }

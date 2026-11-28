@@ -45,6 +45,8 @@ enum Item {
     Tricks,
     /// DLL mods beside it.
     DllMods,
+    /// Give GSE the achievements list it lacks.
+    GseAch,
 }
 
 impl App {
@@ -85,6 +87,9 @@ impl App {
                     }
                     if self.can_dll_mods(key) {
                         v.push((Item::DllMods, tr("dm_menu").to_string(), None));
+                    }
+                    if self.can_gse_ach(key) {
+                        v.push((Item::GseAch, tr("gse_menu").to_string(), None));
                     }
                     if self.can_uninstall(key) {
                         v.push((Item::Uninstall, tr("mg_uninstall_dots").to_string(), None));
@@ -156,6 +161,10 @@ impl App {
             (Item::Move, MenuFor::Game(k)) => {
                 self.menu = None;
                 self.manage_move(&k);
+            }
+            (Item::GseAch, MenuFor::Game(k)) => {
+                self.menu = None;
+                self.gse_ach(&k);
             }
             (Item::DllMods, MenuFor::Game(k)) => {
                 self.menu = None;

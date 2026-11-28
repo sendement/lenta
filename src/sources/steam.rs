@@ -615,6 +615,24 @@ pub struct Achievement {
     pub percent: Option<f32>,
 }
 
+/// Text some games give as its UTF-8 bytes in hex ("e8 a8 98 e6 86 b6"):
+/// the text itself; anything else as it is.
+pub fn unhex(s: String) -> String {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() < 2 || !parts.iter().all(|p| p.len() == 2) {
+        return s;
+    }
+    let bytes: Option<Vec<u8>> = parts
+        .iter()
+        .map(|p| u8::from_str_radix(p, 16).ok())
+        .collect();
+    match bytes.map(String::from_utf8) {
+        // Real text has letters beyond ASCII, else "ab cd" stays a word.
+        Some(Ok(t)) if !t.is_ascii() => t,
+        _ => s,
+    }
+}
+
 fn localized(kv: Option<&Kv>, lang: &str) -> String {
     match kv {
         Some(Kv::Str(s)) => s.clone(),
@@ -666,8 +684,8 @@ pub fn achievements(appid: u32, lang: &str) -> Option<Vec<Achievement>> {
                 out.push(Achievement {
                     id: a.get_str("name").unwrap_or_default().to_string(),
                     percent: None,
-                    name: localized(d.and_then(|d| d.get("name")), lang),
-                    desc: localized(d.and_then(|d| d.get("desc")), lang),
+                    name: unhex(localized(d.and_then(|d| d.get("name")), lang)),
+                    desc: unhex(localized(d.and_then(|d| d.get("desc")), lang)),
                     icon: icon("icon"),
                     icon_gray: icon("icon_gray"),
                     hidden: d.and_then(|d| d.get_int("hidden")).unwrap_or(0) != 0,

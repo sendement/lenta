@@ -156,6 +156,7 @@ fn nxm(link: &str) {
 }
 
 fn answer(q: &Q) -> Value {
+    nexus::set_ru(q.ru);
     if q.game.is_object() {
         return game_answer(q);
     }
@@ -211,6 +212,10 @@ fn main_answer(q: &Q) -> Value {
     if !cfg.user.is_empty() {
         items.push(json!({"type": "info", "label": t(ru, "Account", "Аккаунт"),
             "value": format!("{}{}", cfg.user, if cfg.premium { " · Premium" } else { "" })}));
+    } else if !cfg.apikey.is_empty() {
+        items.push(json!({"type": "info", "label": t(ru, "Account", "Аккаунт"),
+            "value": t(ru, "the key isn't accepted by Nexus — put in a fresh one",
+                "Nexus не принял ключ — вставьте заново")}));
     }
     let ours = nexus::handler() == "lenta-nxm.desktop";
     items.push(json!({

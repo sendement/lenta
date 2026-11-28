@@ -194,6 +194,9 @@ pub struct App {
     pub running: crate::running::Shared,
     /// The games that thread looks at.
     watch: std::sync::Arc<std::sync::Mutex<Vec<crate::running::Watch>>>,
+    /// Which games' GSE lacks its achievements list (looked at most every
+    /// few seconds: the game page asks each frame).
+    pub gse_seen: std::cell::RefCell<std::collections::HashMap<String, (Instant, bool)>>,
     /// Games whose emulator keeps achievements, watched while they run.
     ach_watch: std::sync::Arc<std::sync::Mutex<Vec<crate::achwatch::Item>>>,
     /// Games that earned an achievement since last drawn.
@@ -301,6 +304,7 @@ impl App {
         }
         let music_ctx = ctx.clone();
         let mut app = App {
+            gse_seen: Default::default(),
             ach_watch,
             ach_earned,
             images: Images::new(ctx.clone()),
@@ -436,6 +440,14 @@ impl App {
             let mut s = s;
             sources::web::apply_picks(&mut s.games);
             sources::web::apply_picks(&mut s.steam.more);
+            // A rescan shows what's on disk first, its art fetched after:
+            // till then the cards keep the art they had (the last pass
+            // has it all, a reset pick included).
+            if !s.last {
+                keep_art(&self.games, &mut s.games);
+            } else {
+                save_found(&s.games);
+            }
             // Launchers' games not installed join Steam's owned ones.
             let (games, absent): (Vec<Game>, Vec<Game>) =
                 s.games.into_iter().partition(|g| g.installed);
@@ -481,6 +493,7 @@ impl App {
                     })
                     .collect();
             }
+            self.store.count_trophies(&self.games);
             sources::sort(&mut self.games, self.cfg.sort);
             // Changes still waiting on Steam outlive the rescan.
             let pending = std::mem::take(&mut self.steam.pending);
@@ -1593,6 +1606,94 @@ impl eframe::App for App {
         } else if focused && self.cfg.glow > 0.0 && self.game.is_none() {
             // The selected card's glow breathes; never while a game is up.
             ctx.request_repaint_after(Duration::from_millis(33));
+        }
+    }
+}
+
+/// What a game from elsewhere was last found with: art and store match.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Found {
+    art: crate::game::Arts,
+    store_appid: Option<u32>,
+}
+
+fn found_file() -> std::path::PathBuf {
+    crate::net::cache_dir().join("found-art.json")
+}
+
+/// Remember the art found for games not from Steam (Steam's own is on
+/// disk), so the next start shows it at once.
+fn save_found(games: &[Game]) {
+    if std::env::var_os("LENTA_DRY_RUN").is_some() {
+        return;
+    }
+    let map: std::collections::HashMap<&str, Found> = games
+        .iter()
+        .filter(|g| g.source != Source::Steam)
+        .map(|g| {
+            (
+                g.key.as_str(),
+                Found {
+                    art: g.art.clone(),
+                    store_appid: g.store_appid,
+                },
+            )
+        })
+        .collect();
+    if let Ok(b) = serde_json::to_vec(&map) {
+        let f = found_file();
+        let tmp = f.with_extension("json.tmp");
+        if std::fs::write(&tmp, b).is_ok() {
+            let _ = std::fs::rename(tmp, f);
+        }
+    }
+}
+
+fn load_found() -> std::collections::HashMap<String, Found> {
+    std::fs::read(found_file())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Fill what a game lacks from what it had (art, store match).
+fn fill_from(g: &mut Game, art: &crate::game::Arts, store_appid: Option<u32>) {
+    let a = &mut g.art;
+    for (x, y) in [
+        (&mut a.portrait, &art.portrait),
+        (&mut a.portrait_alt, &art.portrait_alt),
+        (&mut a.landscape, &art.landscape),
+        (&mut a.landscape_alt, &art.landscape_alt),
+        (&mut a.hero, &art.hero),
+        (&mut a.logo, &art.logo),
+        (&mut a.icon, &art.icon),
+    ] {
+        if x.is_none() {
+            x.clone_from(y);
+        }
+    }
+    if g.store_appid.is_none() {
+        g.store_appid = store_appid;
+    }
+}
+
+/// Art and store matches the new list lacks, from the old one (by key) or,
+/// at start, from what was found last time.
+fn keep_art(old: &[Game], new: &mut [Game]) {
+    if old.is_empty() {
+        let found = load_found();
+        for g in new.iter_mut() {
+            if let Some(f) = found.get(&g.key) {
+                fill_from(g, &f.art, f.store_appid);
+            }
+        }
+        return;
+    }
+    let by: std::collections::HashMap<&str, &Game> =
+        old.iter().map(|g| (g.key.as_str(), g)).collect();
+    for g in new {
+        if let Some(o) = by.get(g.key.as_str()) {
+            fill_from(g, &o.art, o.store_appid);
         }
     }
 }

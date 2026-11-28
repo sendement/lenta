@@ -48,6 +48,25 @@ settings (Steam ID) when the files name none, and show the list unearned
 until the emulator writes its first save; the id also goes to umu as
 `GAMEID=umu-<id>` for that game's protonfixes.
 
+Goldberg/GSE keeps only the achievements its `steam_settings/achievements.json`
+lists, and some releases ship without it: every unlock is then dropped. The
+Achievements tab says so, and the game's menu has **Turn on achievement
+saving**, which writes that list from Steam's (names in English and Russian,
+hidden ones, icons in `achievement_images`) — the way GSE's own
+`generate_emu_config` does. Nothing in the game is replaced.
+
+While playing, each achievement shows on Lenta's own banner over the game (a
+wlr-layer-shell overlay surface, top middle, clicks pass through) with its
+icon, name, the game's tally and grade; where the desktop has no layer-shell
+(GNOME, gamescope) it's a desktop notification instead. Both can be turned
+off in Settings → Achievements.
+
+Grades by how many of a game's achievements are earned: bronze from 25%,
+silver from 50%, gold from 75%, a platinum cup for all of them. They're shown
+on the cards and the Achievements tab (with how many more the next grade
+takes); installed games are counted in the background and kept in
+`~/.cache/lenta/trophies.json`.
+
 ### Steam account and client (optional)
 
 - **Collections** from the Steam client's own files show as library

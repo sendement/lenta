@@ -93,6 +93,12 @@ pub struct Config {
     pub file_portal: bool,
     /// Modules' tabs on a game's page gathered into one (two or more).
     pub group_mod_tabs: bool,
+    /// A medal or cup on cards by how many achievements are earned.
+    pub trophy_badges: bool,
+    /// Tell achievements earned while playing.
+    pub ach_notify: bool,
+    /// Lenta's own banner over the game (else the desktop's notification).
+    pub ach_banner: bool,
     /// With a Steam account: the owned games that aren't installed, in
     /// the library.
     pub show_uninstalled: bool,
@@ -166,6 +172,9 @@ impl Default for Config {
             prefix_root: String::new(),
             file_portal: false,
             group_mod_tabs: true,
+            trophy_badges: true,
+            ach_notify: true,
+            ach_banner: true,
             show_uninstalled: true,
             theme_music: false,
             ui_sounds: true,

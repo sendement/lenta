@@ -34,13 +34,14 @@ impl Source {
 }
 
 /// A picture: a file on disk, or an address to fetch (and keep) first.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Art {
     File(PathBuf),
     Url(String),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Arts {
     /// Tall cover (600×900).
     pub portrait: Option<Art>,

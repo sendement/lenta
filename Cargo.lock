@@ -2262,7 +2262,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "lenta"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2272,12 +2272,15 @@ dependencies = [
  "eframe",
  "egui",
  "egui_extras",
+ "egui_glow",
  "egui_kittest",
  "flate2",
  "freedesktop-desktop-entry",
  "freedesktop-icons",
  "gilrs",
+ "glow",
  "image",
+ "khronos-egl",
  "libc",
  "lzma-rs",
  "qrcode",
@@ -2291,9 +2294,13 @@ dependencies = [
  "serde_yaml",
  "sha1 0.10.7",
  "sha2",
+ "smithay-client-toolkit 0.20.0",
  "toml",
  "tungstenite",
  "ureq",
+ "wayland-client",
+ "wayland-egl",
+ "wayland-protocols",
  "zip",
 ]
 
@@ -4899,6 +4906,16 @@ dependencies = [
  "rustix 1.1.6",
  "wayland-client",
  "xcursor",
+]
+
+[[package]]
+name = "wayland-egl"
+version = "0.32.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b97bdb7c49e5bd9b7562f38ff84f0dad47079fdc9e926f691a787f6dbc05451"
+dependencies = [
+ "wayland-backend",
+ "wayland-sys",
 ]
 
 [[package]]

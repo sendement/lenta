@@ -831,6 +831,36 @@ pub fn tr(key: &str) -> &'static str {
         ),
         "pg_steam_bad" => ("A Steam ID is a number", "Steam ID — это число"),
         "ach_got" => ("Achievement unlocked", "Достижение получено"),
+        "s_ach" => ("Achievements", "Достижения"),
+        "ach_badges" => ("Medals and cups on cards", "Медали и кубки на карточках"),
+        "ach_notify" => (
+            "Tell achievements earned while playing",
+            "Сообщать о достижениях во время игры",
+        ),
+        "ach_banner" => (
+            "Lenta's own banner over the game (else the desktop's notification)",
+            "Своя плашка Ленты поверх игры (иначе уведомление системы)",
+        ),
+        "tr_bronze" => ("Bronze", "Бронза"),
+        "tr_silver" => ("Silver", "Серебро"),
+        "tr_gold" => ("Gold", "Золото"),
+        "tr_platinum" => ("Platinum", "Платина"),
+        "tr_next" => ("to", "до"),
+        "tr_new" => ("new grade", "новый уровень"),
+        "tr_more" => ("more", "ещё"),
+        "gse_menu" => ("Turn on achievement saving", "Включить запись достижений"),
+        "gse_working" => (
+            "Writing the achievements list for GSE",
+            "Записываю список достижений для GSE",
+        ),
+        "gse_done" => (
+            "GSE now keeps achievements:",
+            "GSE теперь записывает достижения:",
+        ),
+        "gse_hint" => (
+            "The game's Steam emulator (GSE) has no achievements list and drops every unlock: game menu → Turn on achievement saving",
+            "Эмулятор Steam в игре (GSE) без списка достижений и не записывает их: меню игры → Включить запись достижений",
+        ),
         "pg_env_sub" => (
             "NAME=value words: DXVK_HUD=fps, WINEDLLOVERRIDES=…",
             "Через пробел ИМЯ=значение: DXVK_HUD=fps, WINEDLLOVERRIDES=…",
